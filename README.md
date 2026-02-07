@@ -1,30 +1,63 @@
 # GA-Shift: シフト表自動作成システム
 
-遺伝的アルゴリズム（GA）と5エージェント構成による、シフト表自動作成Webアプリケーションです。
+遺伝的アルゴリズム（GA）× AIエージェント（Agno）× MCP による、シフト表自動作成システムです。
+福祉事業所（就労継続支援B型等）の月次スタッフシフトを、対話形式で自動生成します。
 
 ## 特徴
 
-- **14種類の制約テンプレート** — 連勤上限、飛び石連休抑制、公平性確保など、現場のニーズに合わせた制約をGUIで自由にカスタマイズ
-- **Streamlit Web UI** — ブラウザから操作。Excelアップロード → 制約設定 → GA実行 → 結果ダウンロードまで一貫して完結
-- **チャット形式の制約設定** — ターミナルで対話形式のスクリプトから制約を設定してGA実行も可能
+- **遺伝的アルゴリズム** — 一様交叉・突然変異・エリート保存による最適化で、制約を満たすシフト表を自動生成
+- **14種類の制約テンプレート** — 連勤上限、公平性確保、キッチン最低人員など、プラグイン方式で自由にカスタマイズ
+- **MCP（Model Context Protocol）サーバー** — GAエンジンを8つのツールとしてラップし、AIアシスタント（Claude Desktop等）から直接操作可能
+- **Agno AIエージェントチーム** — ヒアリング → 最適化 → 調整 の3段階を対話的に支援
+- **2種類のUI** — タブ式Web UI（従来型）とチャット式AI UI（Agno統合型）を選択可能
 - **Excel入出力** — 既存の勤務表Excelをそのまま入力し、結果もExcelで出力
+
+## アーキテクチャ
+
+```
+┌─────────────────────────────────────────────┐
+│  Streamlit Chat UI  /  Claude Desktop       │  ← ユーザー接点
+└──────────────┬──────────────────┬────────────┘
+               │                 │
+    ┌──────────▼──────────┐     │
+    │  Agno ShiftTeam     │     │
+    │  ├ HearingAgent     │     │
+    │  ├ OptimizerAgent   │     │
+    │  └ AdjusterAgent    │     │
+    └──────────┬──────────┘     │
+               │ MCPTools       │ MCP Protocol
+    ┌──────────▼────────────────▼─────────────┐
+    │  FastMCP Server (8 tools)               │  ← 境界層
+    └──────────────────┬──────────────────────┘
+                       │
+    ┌──────────────────▼──────────────────────┐
+    │  GA Core (変更なし)                      │
+    │  ├ models/   — Pydantic データモデル     │
+    │  ├ ga/       — GAエンジン               │
+    │  ├ constraints/ — 制約レジストリ         │
+    │  └ io/       — Excel入出力              │
+    └─────────────────────────────────────────┘
+```
+
+**設計原則**: GAコア（`models/`, `ga/`, `constraints/`, `io/`）は一切変更しない。MCPサーバーが境界層となり、Agnoエージェントは必ずMCPツール経由でGAコアを操作する。
 
 ## クイックスタート
 
 ```bash
 # 1. リポジトリ取得
-git clone <repository-url>
-cd GA-shift
+git clone https://github.com/kazumasakawahara/ga-shift.git
+cd ga-shift
 
-# 2. Python 仮想環境の作成とインストール（uvを使用）
-uv venv --python 3.12
-uv pip install -e ".[dev]"
+# 2. 依存関係のインストール（uvを使用）
+uv sync
+uv pip install -e ".[agno]"    # Agno + MCP を使う場合
 
-# 3. テンプレートExcelの生成（2026年3月の例）
-.venv/bin/python -m ga_shift.io.template_generator --year 2026 --month 3
+# 3. テスト実行（52件）
+uv run pytest tests/ -q
 
-# 4. Web UIを起動
-.venv/bin/streamlit run src/ga_shift/ui/app.py
+# 4. UI起動（いずれか）
+uv run streamlit run src/ga_shift/ui/app.py       # タブ式UI
+uv run streamlit run src/ga_shift/ui/chat_app.py   # チャット式AI UI
 ```
 
 ブラウザで `http://localhost:8501` を開いてください。
@@ -33,13 +66,31 @@ uv pip install -e ".[dev]"
 
 ## 使い方
 
-### Web UI（推奨）
+### 1. チャット式AI UI（推奨）
 
 ```bash
-.venv/bin/streamlit run src/ga_shift/ui/app.py
+uv run streamlit run src/ga_shift/ui/chat_app.py
 ```
 
-4つのタブで操作します:
+自然言語で対話しながらシフトを作成できます。
+
+```
+ユーザー: 木町家のシフトを作りたい
+AI:       事業所の情報を教えてください。スタッフは何名ですか？
+ユーザー: 5名です。川崎、斎藤、平田、島村、橋本で、島村さんは毎週水曜通院です
+AI:       設定を登録しました。来月のテンプレートを生成しますか？
+ユーザー: はい、3月分をお願いします
+AI:       テンプレートを生成しました。希望休を入力したらアップロードしてください。
+...
+```
+
+サイドバーからExcelのアップロード・ダウンロードも可能です。
+
+### 2. タブ式Web UI
+
+```bash
+uv run streamlit run src/ga_shift/ui/app.py
+```
 
 | タブ | 説明 |
 |------|------|
@@ -48,15 +99,28 @@ uv pip install -e ".[dev]"
 | **GA実行** | 世代数・エリート数などを設定し、進捗バー付きでGA実行 |
 | **結果** | シフト表・違反一覧を確認し、結果Excelをダウンロード |
 
-### チャット形式スクリプト（ターミナル操作）
+### 3. MCPサーバー（Claude Desktop / AI連携）
 
 ```bash
-.venv/bin/python scripts/chat_constraints.py
+# MCPサーバー単体起動（stdio モード）
+uv run python -m ga_shift.mcp
 ```
 
-対話形式で制約を選び、パラメータを入力し、GAを実行できます。Excelファイルのパスを指定するだけで使えます。
+Claude Desktop の `claude_desktop_config.json` に追加:
 
-### Python API
+```json
+{
+  "mcpServers": {
+    "ga-shift": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "ga_shift.mcp"],
+      "cwd": "/path/to/kimachiya-shift"
+    }
+  }
+}
+```
+
+### 4. Python API
 
 ```python
 from ga_shift.agents.conductor import ConductorAgent
@@ -73,34 +137,39 @@ result = conductor.run_full_pipeline(
 print(f"最終スコア: {result['shift_result'].best_score}")
 ```
 
+## MCPツール一覧
+
+| ツール | 説明 |
+|--------|------|
+| `setup_facility` | 事業所の初期設定（名前、種別、スタッフ構成） |
+| `add_constraint` | 制約テンプレートの追加・カスタマイズ |
+| `list_constraints` | 利用可能な全制約テンプレートの一覧 |
+| `generate_shift_template` | 月次Excelテンプレートの生成 |
+| `run_optimization` | GAによるシフト最適化の実行 |
+| `explain_result` | 最適化結果のわかりやすい説明 |
+| `adjust_schedule` | 手動でのシフト調整（コンプライアンスチェック付き） |
+| `check_compliance` | 人員配置基準の充足状況チェック |
+
 ## Excelテンプレート
 
 入力Excelは以下のレイアウトです（シート名: `シフト表`）:
 
 ```
-       A         B   C   D   ...  AF   AG
-Row 0: シフト表（2026年3月）             ← タイトル
+       A         B       C         D      E  F  ...
+Row 0: シフト表（2026年3月）                      ← タイトル
 Row 1: (空行)
-Row 2: 社員名     1   2   3  ...  31   休日数
-Row 3: 曜日       日  月  火  ...  火
-Row 4: 社員A      ◎          ...        9
- ...   (社員データ 10名)
-Row14: (空行)
-Row15: 必要人数    7   7   7  ...  7
+Row 2: 社員名  雇用形態  セクション  有休残  1  2  ...
+Row 3: 曜日                               日  月  ...
+Row 4: 川崎聡  正規    仕込み・ランチ   3        ◎ ...
+ ...
 ```
 
-| セル | 意味 |
-|------|------|
-| 空欄 | 出勤可能（GAがスケジューリング） |
-| `◎` | 希望休（固定、GAは変更しない） |
-| 休日数 | 契約休日数（◎を含む合計） |
-| 必要人数 | その日に必要な出勤人数 |
-
-テンプレート生成コマンド:
-
-```bash
-.venv/bin/python -m ga_shift.io.template_generator --year 2026 --month 3 --employees 10
-```
+| セル | コード | 意味 |
+|------|--------|------|
+| 空欄 | 0 | 出勤可能（GAがスケジューリング） |
+| `休` | 1 | GAが割り当てた休日 |
+| `◎` | 2 | 希望休（固定、GAは変更しない） |
+| `×` | 3 | 出勤不可日（固定） |
 
 ## 制約テンプレート一覧
 
@@ -134,47 +203,110 @@ Row15: 必要人数    7   7   7  ...  7
 | 週末休日の公平配分 | 社員間の週末休日数差を抑制 | 許容差 |
 | 休日の曜日偏り抑制 | 休日が特定曜日に偏ることを抑制 | 重み |
 
+### 木町家専用制約
+| 制約 | ペナルティ | 説明 |
+|------|-----------|------|
+| キッチン最低人員 | 50 | 仕込み・ランチセクションの最低出勤人数を確保 |
+| 代役ルール | 40 | 島村休→斎藤が出勤する代替ルール |
+| 有給取得上限 | 20 | 有休残日数以上の希望休を抑制 |
+| 出勤不可日保護 | 1000 | ×マークの日に出勤を割り当てない（ハード制約） |
+
 ## プロジェクト構成
 
 ```
-GA-shift/
-├── README.md                  ← このファイル
-├── SETUP_GUIDE.md             ← セットアップ手順
-├── pyproject.toml             ← プロジェクト設定・依存関係
-├── shift_input.xlsx           ← サンプル入力データ
-├── scripts/
-│   └── chat_constraints.py    ← チャット形式の制約設定スクリプト
+kimachiya-shift/
+├── README.md                     ← このファイル
+├── HANDOVER.md                   ← プロジェクト引き継ぎ資料
+├── GA-SHIFT-AGNO-PLAN.md        ← Agno再構成設計書
+├── SETUP_GUIDE.md                ← セットアップ手順
+├── pyproject.toml                ← プロジェクト設定・依存関係
+│
 ├── src/ga_shift/
-│   ├── models/                ← Pydanticデータモデル
-│   ├── agents/                ← 5エージェント（Conductor, ConstraintBuilder, GAEngine, Validator, Reporter）
-│   ├── constraints/           ← 制約テンプレートシステム（14種）
-│   ├── ga/                    ← GAエンジン（operators, population, evaluation, engine）
-│   ├── io/                    ← Excel入出力 + テンプレート生成
-│   └── ui/                    ← Streamlit Web UI
-└── tests/                     ← テストスイート
+│   ├── models/                   ← Pydanticデータモデル
+│   │   ├── schedule.py           ← ShiftInput, ShiftResult
+│   │   ├── employee.py           ← EmployeeInfo
+│   │   ├── constraint.py         ← ConstraintConfig, ConstraintSet
+│   │   ├── ga_config.py          ← GAConfig
+│   │   └── validation.py         ← ValidationReport
+│   │
+│   ├── ga/                       ← GAエンジン
+│   │   ├── engine.py             ← メインGA実行
+│   │   ├── operators.py          ← 交叉・突然変異
+│   │   ├── population.py         ← 初期集団生成
+│   │   └── evaluation.py         ← 適応度評価
+│   │
+│   ├── constraints/              ← 制約テンプレートシステム（14種+4木町家専用）
+│   │   ├── registry.py           ← ConstraintRegistry（プラグイン管理）
+│   │   ├── kimachi_constraints.py← 木町家専用制約
+│   │   ├── pattern_constraints.py
+│   │   ├── day_constraints.py
+│   │   ├── employee_constraints.py
+│   │   └── fairness_constraints.py
+│   │
+│   ├── io/                       ← Excel入出力
+│   │   ├── excel_reader.py       ← read_shift_input()
+│   │   ├── excel_writer.py       ← 結果出力
+│   │   └── template_generator.py ← テンプレート生成
+│   │
+│   ├── agents/                   ← 内部エージェント（5体構成）
+│   │   ├── conductor.py          ← パイプライン統括
+│   │   ├── constraint_builder.py
+│   │   ├── ga_engine.py
+│   │   ├── validator.py
+│   │   └── reporter.py
+│   │
+│   ├── mcp/                      ← MCP サーバー【NEW】
+│   │   ├── server.py             ← FastMCPサーバー（8ツール）
+│   │   └── __main__.py           ← python -m ga_shift.mcp
+│   │
+│   ├── agno_agents/              ← Agno AIエージェント【NEW】
+│   │   ├── hearing.py            ← ヒアリングAgent
+│   │   ├── optimizer.py          ← 最適化Agent
+│   │   ├── adjuster.py           ← 調整Agent
+│   │   └── team.py               ← ShiftTeam（統括）
+│   │
+│   └── ui/                       ← Streamlit Web UI
+│       ├── app.py                ← タブ式UI
+│       ├── chat_app.py           ← チャット式AI UI【NEW】
+│       ├── components/           ← UIコンポーネント
+│       └── pages/                ← 各タブページ
+│
+├── scripts/
+│   └── chat_constraints.py       ← チャット形式の制約設定
+│
+└── tests/                        ← テストスイート（52件）
+    ├── test_agents/
+    ├── test_constraints/
+    ├── test_ga/
+    └── test_io/
 ```
 
 ## 開発
 
 ```bash
-# テスト実行
-.venv/bin/python -m pytest tests/ -v
+# テスト実行（52件）
+uv run pytest tests/ -q
 
 # リント
-.venv/bin/ruff check src/ tests/
+uv run ruff check src/ tests/
 
 # 型チェック
-.venv/bin/mypy src/ga_shift/
+uv run mypy src/ga_shift/
 ```
 
 ## 技術スタック
 
-- Python 3.12
-- numpy — スケジュール行列演算
-- pandas / openpyxl — Excel入出力
-- Pydantic v2 — データモデル・バリデーション
-- Streamlit — Web UI
-- 遺伝的アルゴリズム — 一様交叉 + 突然変異 + エリート保存
+| レイヤー | 技術 |
+|----------|------|
+| GAエンジン | NumPy（スケジュール行列演算）、独自GA実装 |
+| データモデル | Pydantic v2 |
+| Excel I/O | openpyxl, pandas |
+| MCPサーバー | FastMCP |
+| AIエージェント | Agno（Claude claude-sonnet-4-5-20250929） |
+| メモリ永続化 | Agno Memory + SQLite（SqliteDb） |
+| Web UI | Streamlit |
+| テスト | pytest |
+| パッケージ管理 | uv + hatchling |
 
 ## ライセンス
 
