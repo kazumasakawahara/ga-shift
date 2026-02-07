@@ -21,14 +21,13 @@ def create_adjuster_agent(mcp_server_command: str | None = None) -> Agent:
         設定済みのAgno Agent
     """
     ga_mcp = MCPTools(
-        command=mcp_server_command or "uv",
-        args=["run", "python", "-m", "ga_shift.mcp.server"],
+        command=mcp_server_command or "uv run python -m ga_shift.mcp.server",
     )
 
     return Agent(
         name="調整Agent",
-        agent_id="adjuster-agent",
-        model=Claude(model="claude-sonnet-4-5-20250929"),
+        id="adjuster-agent",
+        model=Claude(id="claude-sonnet-4-5-20250929"),
         tools=[ga_mcp],
         instructions=[
             # ── 役割 ──
@@ -68,5 +67,5 @@ def create_adjuster_agent(mcp_server_command: str | None = None) -> Agent:
             "  例: 「代わりに14日か16日を休みにすれば、基準を満たせます」",
         ],
         markdown=True,
-        show_tool_calls=True,
+        # show_tool_calls is not supported in current agno version
     )

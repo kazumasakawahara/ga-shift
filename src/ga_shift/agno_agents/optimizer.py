@@ -21,14 +21,13 @@ def create_optimizer_agent(mcp_server_command: str | None = None) -> Agent:
         設定済みのAgno Agent
     """
     ga_mcp = MCPTools(
-        command=mcp_server_command or "uv",
-        args=["run", "python", "-m", "ga_shift.mcp.server"],
+        command=mcp_server_command or "uv run python -m ga_shift.mcp.server",
     )
 
     return Agent(
         name="最適化Agent",
-        agent_id="optimizer-agent",
-        model=Claude(model="claude-sonnet-4-5-20250929"),
+        id="optimizer-agent",
+        model=Claude(id="claude-sonnet-4-5-20250929"),
         tools=[ga_mcp],
         instructions=[
             # ── 役割 ──
@@ -63,5 +62,5 @@ def create_optimizer_agent(mcp_server_command: str | None = None) -> Agent:
             "- エラーがあった場合は、何が問題で、どうすれば解決できるか具体的に伝えてください。",
         ],
         markdown=True,
-        show_tool_calls=True,
+        # show_tool_calls is not supported in current agno version
     )

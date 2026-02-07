@@ -23,14 +23,13 @@ def create_hearing_agent(mcp_server_command: str | None = None) -> Agent:
     """
     # GA-shift MCPツール
     ga_mcp = MCPTools(
-        command=mcp_server_command or "uv",
-        args=["run", "python", "-m", "ga_shift.mcp.server"],
+        command=mcp_server_command or "uv run python -m ga_shift.mcp.server",
     )
 
     return Agent(
         name="ヒアリングAgent",
-        agent_id="hearing-agent",
-        model=Claude(model="claude-sonnet-4-5-20250929"),
+        id="hearing-agent",
+        model=Claude(id="claude-sonnet-4-5-20250929"),
         tools=[ga_mcp],
         instructions=[
             # ── 役割 ──
@@ -70,5 +69,5 @@ def create_hearing_agent(mcp_server_command: str | None = None) -> Agent:
             "- 設定が完了したら、内容をわかりやすくまとめて確認を取ってください。",
         ],
         markdown=True,
-        show_tool_calls=True,
+        # show_tool_calls is not supported in current agno version
     )

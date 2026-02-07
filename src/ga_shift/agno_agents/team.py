@@ -56,9 +56,8 @@ def create_shift_team(
 
     team = Team(
         name="シフト最適化チーム",
-        mode="coordinate",
         members=[hearing, optimizer, adjuster],
-        model=Claude(model="claude-sonnet-4-5-20250929"),
+        model=Claude(id="claude-sonnet-4-5-20250929"),
         instructions=[
             "あなたは福祉事業所の月次シフト作成を対話的に支援するチームのリーダーです。",
             "",
@@ -92,7 +91,6 @@ def create_shift_team(
             "- 専門用語は避け、やさしい日本語で対話してください",
         ],
         markdown=True,
-        show_tool_calls=False,
         # --- Memory ---
         **({"db": db, "enable_user_memories": True} if db else {}),
     )
