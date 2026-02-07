@@ -23,6 +23,7 @@ from ga_shift.mcp.server import (
     analyze_schedule_balance as _analyze_schedule_balance_tool,
     check_compliance as _check_compliance_tool,
     explain_result as _explain_result_tool,
+    generate_shift_report as _generate_shift_report_tool,
     generate_shift_template as _generate_shift_template_tool,
     get_accompanied_visits as _get_accompanied_visits_tool,
     get_staffing_requirements as _get_staffing_requirements_tool,
@@ -30,6 +31,7 @@ from ga_shift.mcp.server import (
     list_constraints as _list_constraints_tool,
     run_optimization as _run_optimization_tool,
     setup_facility as _setup_facility_tool,
+    simulate_scenario as _simulate_scenario_tool,
     transfer_staff as _transfer_staff_tool,
 )
 
@@ -51,6 +53,8 @@ get_accompanied_visits = _unwrap(_get_accompanied_visits_tool)
 analyze_schedule_balance = _unwrap(_analyze_schedule_balance_tool)
 get_staffing_requirements = _unwrap(_get_staffing_requirements_tool)
 transfer_staff = _unwrap(_transfer_staff_tool)
+generate_shift_report = _unwrap(_generate_shift_report_tool)
+simulate_scenario = _unwrap(_simulate_scenario_tool)
 
 
 # ---------------------------------------------------------------------------
@@ -898,3 +902,257 @@ class TestTransferStaff:
         presets = _facility_state["employee_presets"]
         preset_names = [p.name for p in presets]
         assert "橋本由紀" not in preset_names
+
+
+# ===================================================================
+# Tool 14: generate_shift_report
+# ===================================================================
+class TestGenerateShiftReport:
+    def test_nonexistent_file(self):
+        """存在しないファイルでエラーを返すこと。"""
+        result = generate_shift_report(result_path="/tmp/nonexistent.xlsx")
+        assert result["status"] == "error"
+        assert "見つかりません" in result["message"]
+
+    def test_basic_report(self, kimachiya_template_path):
+        """基本的なレポート生成が成功すること。"""
+        result = generate_shift_report(result_path=str(kimachiya_template_path))
+        assert result["status"] == "ok"
+        assert "report" in result
+
+    def test_report_has_summary(self, kimachiya_template_path):
+        """レポートにsummaryセクションがあること。"""
+        result = generate_shift_report(result_path=str(kimachiya_template_path))
+        report = result["report"]
+        assert "summary" in report
+        summary = report["summary"]
+        assert "staff_count" in summary
+        assert "total_days" in summary
+        assert "overall_score" in summary
+        assert "grade" in summary
+
+    def test_report_has_balance(self, kimachiya_template_path):
+        """レポートにbalanceセクションがあること。"""
+        result = generate_shift_report(result_path=str(kimachiya_template_path))
+        report = result["report"]
+        assert "balance" in report
+        balance = report["balance"]
+        assert "average_work_days" in balance
+        assert "staff_analysis" in balance
+
+    def test_report_has_compliance(self, kimachiya_template_path):
+        """レポートにcomplianceセクションがあること。"""
+        result = generate_shift_report(result_path=str(kimachiya_template_path))
+        report = result["report"]
+        assert "compliance" in report
+        compliance = report["compliance"]
+        assert "is_compliant" in compliance
+
+    def test_report_has_issues_and_recommendations(self, kimachiya_template_path):
+        """レポートにissuesとrecommendationsがあること。"""
+        result = generate_shift_report(result_path=str(kimachiya_template_path))
+        report = result["report"]
+        assert "issues" in report
+        assert "recommendations" in report
+        assert isinstance(report["issues"], list)
+        assert isinstance(report["recommendations"], list)
+        # recommendations は最低1つある（「良好です」を含む可能性がある）
+        assert len(report["recommendations"]) >= 1
+
+    def test_report_score_range(self, kimachiya_template_path):
+        """スコアが0〜100の範囲であること。"""
+        result = generate_shift_report(result_path=str(kimachiya_template_path))
+        score = result["report"]["summary"]["overall_score"]
+        assert 0 <= score <= 100
+
+    def test_report_grade_is_valid(self, kimachiya_template_path):
+        """グレードがA〜Dのいずれかであること。"""
+        result = generate_shift_report(result_path=str(kimachiya_template_path))
+        grade = result["report"]["summary"]["grade"]
+        assert grade[0] in ("A", "B", "C", "D")
+
+    def test_report_staff_detail(self, kimachiya_template_path):
+        """レポートにstaff_detailがあること。"""
+        result = generate_shift_report(result_path=str(kimachiya_template_path))
+        report = result["report"]
+        assert "staff_detail" in report
+        assert isinstance(report["staff_detail"], list)
+
+
+# ===================================================================
+# Tool 15: simulate_scenario
+# ===================================================================
+class TestSimulateScenario:
+    def test_nonexistent_file(self):
+        """存在しないファイルでエラーを返すこと。"""
+        result = simulate_scenario(
+            base_template_path="/tmp/nonexistent.xlsx",
+            scenario_type="remove_staff",
+        )
+        assert result["status"] == "error"
+        assert "見つかりません" in result["message"]
+
+    def test_invalid_scenario_type(self, kimachiya_template_path):
+        """不明なシナリオ種別でエラーを返すこと。"""
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="invalid_type",
+        )
+        assert result["status"] == "error"
+        assert "不明なシナリオ種別" in result["message"]
+
+    def test_remove_staff_basic(self, kimachiya_template_path, kimachiya_staff):
+        """スタッフ退職シミュレーションが成功すること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="remove_staff",
+            scenario_params={"staff_name": "川崎聡"},
+        )
+        assert result["status"] == "ok"
+        assert result["scenario"]["scenario_type"] == "remove_staff"
+        assert result["scenario"]["staff_name"] == "川崎聡"
+        assert result["scenario"]["staff_found"] is True
+
+    def test_remove_staff_not_found(self, kimachiya_template_path, kimachiya_staff):
+        """存在しないスタッフの退職シミュレーション。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="remove_staff",
+            scenario_params={"staff_name": "存在しない人"},
+        )
+        assert result["status"] == "ok"
+        assert result["scenario"]["staff_found"] is False
+
+    def test_remove_staff_missing_name(self, kimachiya_template_path):
+        """staff_nameなしでエラーを返すこと。"""
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="remove_staff",
+            scenario_params={},
+        )
+        assert result["status"] == "error"
+        assert "staff_name" in result["message"]
+
+    def test_remove_staff_has_risk_level(self, kimachiya_template_path, kimachiya_staff):
+        """退職シミュレーションにリスクレベルが含まれること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="remove_staff",
+            scenario_params={"staff_name": "川崎聡"},
+        )
+        assert "risk_level" in result["scenario"]
+        assert result["scenario"]["risk_level"] in ("高", "中", "低")
+
+    def test_remove_staff_has_baseline(self, kimachiya_template_path, kimachiya_staff):
+        """退職シミュレーションにbaseline情報が含まれること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="remove_staff",
+            scenario_params={"staff_name": "川崎聡"},
+        )
+        assert "baseline" in result
+        assert "staff_count" in result["baseline"]
+
+    def test_add_staff_basic(self, kimachiya_template_path, kimachiya_staff):
+        """スタッフ追加シミュレーションが成功すること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="add_staff",
+            scenario_params={
+                "staff_name": "新人太郎",
+                "employee_type": "パート",
+                "section": "ランチ",
+            },
+        )
+        assert result["status"] == "ok"
+        assert result["scenario"]["scenario_type"] == "add_staff"
+        assert result["scenario"]["new_staff_count"] == 6
+
+    def test_add_staff_has_buffer(self, kimachiya_template_path, kimachiya_staff):
+        """追加シミュレーションにstaffing_bufferが含まれること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="add_staff",
+            scenario_params={"staff_name": "新人"},
+        )
+        assert "staffing_buffer" in result["scenario"]
+
+    def test_change_users_basic(self, kimachiya_template_path, kimachiya_staff):
+        """利用者数変更シミュレーションが成功すること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="change_users",
+            scenario_params={"new_user_count": 30},
+        )
+        assert result["status"] == "ok"
+        assert result["scenario"]["scenario_type"] == "change_users"
+        assert result["scenario"]["new_user_count"] == 30
+
+    def test_change_users_has_gap(self, kimachiya_template_path, kimachiya_staff):
+        """利用者数変更シミュレーションにstaff_gapが含まれること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="change_users",
+            scenario_params={"new_user_count": 30},
+        )
+        assert "staff_gap" in result["scenario"]
+        assert "meets_new_minimum" in result["scenario"]
+
+    def test_change_constraint_basic(self, kimachiya_template_path):
+        """制約変更シミュレーションが成功すること。"""
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="change_constraint",
+            scenario_params={"constraint_type": "kitchen_min_workers"},
+        )
+        assert result["status"] == "ok"
+        assert result["scenario"]["scenario_type"] == "change_constraint"
+
+    def test_change_constraint_invalid(self, kimachiya_template_path):
+        """存在しない制約でエラーを返すこと。"""
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="change_constraint",
+            scenario_params={"constraint_type": "nonexistent_constraint"},
+        )
+        assert result["status"] == "error"
+        assert "存在しません" in result["message"]
+
+    def test_change_constraint_missing_type(self, kimachiya_template_path):
+        """constraint_typeなしでエラーを返すこと。"""
+        result = simulate_scenario(
+            base_template_path=str(kimachiya_template_path),
+            scenario_type="change_constraint",
+            scenario_params={},
+        )
+        assert result["status"] == "error"
+        assert "constraint_type" in result["message"]
+
+    def test_all_scenarios_have_recommendations(self, kimachiya_template_path, kimachiya_staff):
+        """全シナリオタイプにrecommendationsが含まれること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+
+        scenarios = [
+            ("remove_staff", {"staff_name": "川崎聡"}),
+            ("add_staff", {"staff_name": "新人"}),
+            ("change_users", {"new_user_count": 25}),
+            ("change_constraint", {"constraint_type": "kitchen_min_workers"}),
+        ]
+
+        for scenario_type, params in scenarios:
+            result = simulate_scenario(
+                base_template_path=str(kimachiya_template_path),
+                scenario_type=scenario_type,
+                scenario_params=params,
+            )
+            assert result["status"] == "ok", f"{scenario_type} failed"
+            assert "recommendations" in result, f"{scenario_type} has no recommendations"
+            assert isinstance(result["recommendations"], list)

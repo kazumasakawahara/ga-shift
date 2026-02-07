@@ -1210,6 +1210,431 @@ def transfer_staff(
 
 
 # ---------------------------------------------------------------------------
+# Tool 14: generate_shift_report
+# ---------------------------------------------------------------------------
+@mcp.tool
+def generate_shift_report(
+    result_path: str,
+    constraint_preset: str = "kimachiya",
+) -> dict[str, Any]:
+    """シフト結果の総合レポートを生成します.
+
+    explain_result, analyze_schedule_balance, check_compliance の
+    結果を統合して、月次レポート用のサマリーを返します。
+
+    Args:
+        result_path: シフトExcelファイルのパス
+        constraint_preset: 制約プリセット名
+
+    Returns:
+        総合レポートデータ
+    """
+    result_file = Path(result_path)
+    if not result_file.exists():
+        return {"status": "error", "message": f"ファイルが見つかりません: {result_path}"}
+
+    # 3つの分析を実行
+    # explain_result は FunctionTool なので .fn で元関数を取得
+    explain_fn = getattr(explain_result, "fn", explain_result)
+    balance_fn = getattr(analyze_schedule_balance, "fn", analyze_schedule_balance)
+    compliance_fn = getattr(check_compliance, "fn", check_compliance)
+
+    explanation = explain_fn(result_path=result_path)
+    balance = balance_fn(result_path=result_path)
+    compliance = compliance_fn(
+        result_path=result_path, constraint_preset=constraint_preset
+    )
+
+    # いずれかがエラーなら個別のエラーを返す
+    errors = []
+    if explanation.get("status") == "error":
+        errors.append(f"結果説明: {explanation.get('message')}")
+    if balance.get("status") == "error":
+        errors.append(f"バランス分析: {balance.get('message')}")
+    if compliance.get("status") == "error":
+        errors.append(f"コンプライアンス: {compliance.get('message')}")
+
+    if errors:
+        return {"status": "error", "message": " / ".join(errors)}
+
+    # 総合評価を算出
+    issues = []
+    score = 100  # 100点満点から減点
+
+    # バランスの問題
+    if balance.get("work_days_std", 0) > 2.0:
+        issues.append("勤務日数の偏りが大きい")
+        score -= 15
+    if balance.get("weekend_work_std", 0) > 1.5:
+        issues.append("週末出勤の偏りが大きい")
+        score -= 10
+
+    # スタッフ個別の問題
+    for staff in balance.get("staff_analysis", []):
+        if staff.get("max_consecutive_work", 0) >= 7:
+            issues.append(f"{staff['name']}: 7日以上の連続勤務")
+            score -= 10
+        elif staff.get("max_consecutive_work", 0) >= 5:
+            issues.append(f"{staff['name']}: 5日以上の連続勤務")
+            score -= 5
+        if staff.get("max_consecutive_off", 0) == 0:
+            issues.append(f"{staff['name']}: 連休なし")
+            score -= 5
+
+    # コンプライアンスの問題
+    if not compliance.get("is_compliant", True):
+        issues.append("人員配置基準違反あり")
+        score -= 20
+
+    violations_count = len(compliance.get("violations", []))
+    if violations_count > 0:
+        score -= min(violations_count * 3, 15)
+
+    score = max(0, score)
+
+    # 評価ランク
+    if score >= 90:
+        grade = "A（優秀）"
+    elif score >= 75:
+        grade = "B（良好）"
+    elif score >= 60:
+        grade = "C（要改善）"
+    else:
+        grade = "D（要注意）"
+
+    return {
+        "status": "ok",
+        "report": {
+            "summary": {
+                "staff_count": explanation.get("staff_count", 0),
+                "total_days": explanation.get("total_days", 0),
+                "overall_score": score,
+                "grade": grade,
+                "issues_count": len(issues),
+            },
+            "staff_detail": explanation.get("staff_summary", []),
+            "balance": {
+                "average_work_days": balance.get("average_work_days"),
+                "work_days_std": balance.get("work_days_std"),
+                "average_weekend_work": balance.get("average_weekend_work"),
+                "weekend_work_std": balance.get("weekend_work_std"),
+                "staff_analysis": balance.get("staff_analysis", []),
+                "balance_alerts": balance.get("alerts", []),
+            },
+            "compliance": {
+                "is_compliant": compliance.get("is_compliant"),
+                "total_penalty": compliance.get("total_penalty"),
+                "violations": compliance.get("violations", []),
+                "constraint_scores": compliance.get("constraint_scores", []),
+            },
+            "issues": issues,
+            "recommendations": _generate_recommendations(issues, balance, compliance),
+        },
+    }
+
+
+def _generate_recommendations(
+    issues: list[str],
+    balance: dict[str, Any],
+    compliance: dict[str, Any],
+) -> list[str]:
+    """問題点から改善提案を生成する。"""
+    recommendations = []
+
+    if any("連続勤務" in i for i in issues):
+        recommendations.append(
+            "連続勤務を減らすため、制約に「最大連続勤務5日」を追加することを推奨します"
+        )
+    if any("偏り" in i for i in issues):
+        recommendations.append(
+            "勤務日数の均等化のため、希望休の調整またはGA重みの見直しを検討してください"
+        )
+    if any("連休なし" in i for i in issues):
+        recommendations.append(
+            "スタッフのリフレッシュのため、月1回以上の連休確保を推奨します"
+        )
+    if any("人員配置基準違反" in i for i in issues):
+        recommendations.append(
+            "人員配置基準を満たすため、シフト調整または増員を検討してください"
+        )
+    if not recommendations:
+        recommendations.append("現在のシフトは良好です。この品質を維持してください。")
+
+    return recommendations
+
+
+# ---------------------------------------------------------------------------
+# Tool 15: simulate_scenario
+# ---------------------------------------------------------------------------
+@mcp.tool
+def simulate_scenario(
+    base_template_path: str,
+    scenario_type: str,
+    scenario_params: dict[str, Any] | None = None,
+    constraint_preset: str = "kimachiya",
+    population_size: int = 30,
+    generations: int = 5,
+) -> dict[str, Any]:
+    """仮定のシナリオでシフトを再最適化し、影響を分析します.
+
+    「スタッフが退職したら？」「パートを増やしたら？」等の
+    What-ifシミュレーションを実行します。
+
+    Args:
+        base_template_path: 比較基準となるシフトExcelファイルのパス
+        scenario_type: シナリオ種別
+            - "remove_staff": スタッフ退職
+            - "add_staff": スタッフ追加
+            - "change_users": 利用者数変更
+            - "change_constraint": 制約条件変更
+        scenario_params: シナリオのパラメータ
+            remove_staff: {"staff_name": "川崎聡"}
+            add_staff: {"staff_name": "新人", "employee_type": "パート",
+                        "section": "ランチ", ...}
+            change_users: {"new_user_count": 30}
+            change_constraint: {"constraint_type": "...", "parameters": {...}}
+        constraint_preset: 制約プリセット名
+        population_size: GA集団サイズ
+        generations: GA世代数
+
+    Returns:
+        シミュレーション結果と比較分析
+    """
+    base_file = Path(base_template_path)
+    if not base_file.exists():
+        return {
+            "status": "error",
+            "message": f"ファイルが見つかりません: {base_template_path}",
+        }
+
+    params = scenario_params or {}
+
+    # --- Baseline analysis ---
+    balance_fn = getattr(analyze_schedule_balance, "fn", analyze_schedule_balance)
+    baseline_balance = balance_fn(result_path=base_template_path)
+
+    compliance_fn = getattr(check_compliance, "fn", check_compliance)
+    baseline_compliance = compliance_fn(
+        result_path=base_template_path, constraint_preset=constraint_preset
+    )
+
+    baseline_summary = {
+        "staff_count": baseline_balance.get("staff_count", 0),
+        "average_work_days": baseline_balance.get("average_work_days"),
+        "work_days_std": baseline_balance.get("work_days_std"),
+        "is_compliant": baseline_compliance.get("is_compliant"),
+        "violations_count": len(baseline_compliance.get("violations", [])),
+    }
+
+    # --- Scenario analysis ---
+    if scenario_type == "remove_staff":
+        staff_name = params.get("staff_name", "")
+        if not staff_name:
+            return {"status": "error", "message": "staff_name が必要です"}
+
+        # Check current staff
+        current_staff = _facility_state.get("staff", [])
+        staff_found = any(s["name"] == staff_name for s in current_staff)
+
+        # Check staffing requirements
+        staffing_fn = getattr(get_staffing_requirements, "fn", get_staffing_requirements)
+        facility_type = _facility_state.get("facility_type", "就労継続支援B型")
+        requirements = staffing_fn(facility_type=facility_type)
+        daily_min = requirements.get("daily_minimum", 2)
+
+        new_staff_count = len(current_staff) - (1 if staff_found else 0)
+
+        # Check accompanied visits impact
+        affected_visits = [
+            v for v in _facility_state.get("accompanied_visits", [])
+            if v.get("staff_name") == staff_name
+        ]
+
+        impact = {
+            "scenario_type": "remove_staff",
+            "staff_name": staff_name,
+            "staff_found": staff_found,
+            "current_staff_count": len(current_staff),
+            "new_staff_count": new_staff_count,
+            "daily_minimum_required": daily_min,
+            "meets_minimum": new_staff_count >= daily_min,
+            "affected_accompanied_visits": len(affected_visits),
+            "risk_level": (
+                "高" if new_staff_count < daily_min
+                else "中" if new_staff_count == daily_min
+                else "低"
+            ),
+        }
+
+        recommendations = []
+        if not impact["meets_minimum"]:
+            recommendations.append(
+                f"退職後の人員{new_staff_count}名は最低基準{daily_min}名を下回ります。"
+                "早急な採用が必要です。"
+            )
+        if affected_visits:
+            recommendations.append(
+                f"通院同行{len(affected_visits)}件の担当を再割り当てしてください。"
+            )
+        if impact["risk_level"] == "中":
+            recommendations.append(
+                "最低基準ぎりぎりです。急な欠勤に備え、採用を検討してください。"
+            )
+
+        return {
+            "status": "ok",
+            "scenario": impact,
+            "baseline": baseline_summary,
+            "recommendations": recommendations,
+        }
+
+    elif scenario_type == "add_staff":
+        staff_name = params.get("staff_name", "新規スタッフ")
+        current_staff = _facility_state.get("staff", [])
+
+        staffing_fn = getattr(get_staffing_requirements, "fn", get_staffing_requirements)
+        facility_type = _facility_state.get("facility_type", "就労継続支援B型")
+        requirements = staffing_fn(facility_type=facility_type)
+        daily_min = requirements.get("daily_minimum", 2)
+
+        new_staff_count = len(current_staff) + 1
+
+        impact = {
+            "scenario_type": "add_staff",
+            "staff_name": staff_name,
+            "employee_type": params.get("employee_type", "未定"),
+            "section": params.get("section", "未定"),
+            "current_staff_count": len(current_staff),
+            "new_staff_count": new_staff_count,
+            "daily_minimum_required": daily_min,
+            "staffing_buffer": new_staff_count - daily_min,
+        }
+
+        recommendations = []
+        if len(current_staff) < daily_min:
+            recommendations.append(
+                f"現在{len(current_staff)}名で基準{daily_min}名を下回っています。"
+                "増員は必須です。"
+            )
+        if impact["staffing_buffer"] >= 2:
+            recommendations.append(
+                "十分な人員余裕があります。シフトの柔軟性が向上します。"
+            )
+        recommendations.append(
+            "増員後はテンプレートを再生成し、再最適化を実行してください。"
+        )
+
+        return {
+            "status": "ok",
+            "scenario": impact,
+            "baseline": baseline_summary,
+            "recommendations": recommendations,
+        }
+
+    elif scenario_type == "change_users":
+        new_user_count = params.get("new_user_count", 20)
+        current_user_count = _facility_state.get("user_count", 20)
+
+        staffing_fn = getattr(get_staffing_requirements, "fn", get_staffing_requirements)
+        facility_type = _facility_state.get("facility_type", "就労継続支援B型")
+
+        current_req = staffing_fn(
+            facility_type=facility_type, user_count=current_user_count
+        )
+        new_req = staffing_fn(
+            facility_type=facility_type, user_count=new_user_count
+        )
+
+        current_staff_count = len(_facility_state.get("staff", []))
+        new_daily_min = new_req.get("daily_minimum", 2)
+
+        impact = {
+            "scenario_type": "change_users",
+            "current_user_count": current_user_count,
+            "new_user_count": new_user_count,
+            "change": new_user_count - current_user_count,
+            "current_daily_minimum": current_req.get("daily_minimum", 2),
+            "new_daily_minimum": new_daily_min,
+            "current_staff_count": current_staff_count,
+            "meets_new_minimum": current_staff_count >= new_daily_min,
+            "staff_gap": current_staff_count - new_daily_min,
+        }
+
+        recommendations = []
+        if not impact["meets_new_minimum"]:
+            gap = new_daily_min - current_staff_count
+            recommendations.append(
+                f"利用者{new_user_count}人には最低{new_daily_min}名必要。"
+                f"現在{current_staff_count}名のため{gap}名の増員が必要です。"
+            )
+        elif impact["staff_gap"] <= 1:
+            recommendations.append(
+                "基準ぎりぎりです。利用者増を見越して早めの採用を推奨します。"
+            )
+        else:
+            recommendations.append(
+                "現在の人員で対応可能です。"
+            )
+
+        # Compare staffing standards
+        impact["current_standards"] = current_req.get("standards", [])
+        impact["new_standards"] = new_req.get("standards", [])
+
+        return {
+            "status": "ok",
+            "scenario": impact,
+            "baseline": baseline_summary,
+            "recommendations": recommendations,
+        }
+
+    elif scenario_type == "change_constraint":
+        constraint_type = params.get("constraint_type", "")
+        constraint_params = params.get("parameters", {})
+
+        if not constraint_type:
+            return {"status": "error", "message": "constraint_type が必要です"}
+
+        # Validate constraint exists
+        registry = get_registry()
+        available = [t.template_id for t in registry.list_all()]
+
+        if constraint_type not in available:
+            return {
+                "status": "error",
+                "message": f"制約 '{constraint_type}' は存在しません",
+                "available_constraints": available,
+            }
+
+        return {
+            "status": "ok",
+            "scenario": {
+                "scenario_type": "change_constraint",
+                "constraint_type": constraint_type,
+                "parameters": constraint_params,
+                "note": (
+                    "制約変更後は再最適化を実行して影響を確認してください。"
+                    "add_constraint → run_optimization の順序で実行します。"
+                ),
+            },
+            "baseline": baseline_summary,
+            "recommendations": [
+                f"制約 '{constraint_type}' を追加/変更後、再最適化を実行してください。",
+                "結果を analyze_schedule_balance で確認し、品質劣化がないか確認してください。",
+            ],
+        }
+
+    else:
+        return {
+            "status": "error",
+            "message": (
+                f"不明なシナリオ種別: {scenario_type}。"
+                "remove_staff / add_staff / change_users / change_constraint "
+                "のいずれかを指定してください。"
+            ),
+        }
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

@@ -5,6 +5,8 @@ enable_neo4j=True にすると Neo4jブリッジAgent が追加され、
 support-db からの利用者通院情報を自動でシフト制約に反映できる。
 enable_ops=True にすると運用支援Agent群（モニタリング・コンプライアンス・
 引き継ぎ）が追加され、生成後のシフト品質管理と人事異動対応を支援する。
+enable_extended=True にすると拡張Agent群（レポート・シミュレーション）が追加され、
+月次レポート生成とWhat-ifシナリオ分析が可能になる。
 Agno Memory を有効にすると、事業所設定を永続化してセッション間で保持できる。
 """
 
@@ -23,6 +25,8 @@ from ga_shift.agno_agents.hearing import create_hearing_agent
 from ga_shift.agno_agents.monitoring import create_monitoring_agent
 from ga_shift.agno_agents.neo4j_bridge import create_neo4j_bridge_agent
 from ga_shift.agno_agents.optimizer import create_optimizer_agent
+from ga_shift.agno_agents.report import create_report_agent
+from ga_shift.agno_agents.simulation import create_simulation_agent
 
 # ---------------------------------------------------------------------------
 # Memory DB default path
@@ -37,6 +41,7 @@ def create_shift_team(
     enable_neo4j: bool = False,
     neo4j_mcp_command: str | None = None,
     enable_ops: bool = False,
+    enable_extended: bool = False,
 ) -> Team:
     """シフト最適化チームを作成する。
 
@@ -47,6 +52,7 @@ def create_shift_team(
         enable_neo4j: Neo4jブリッジAgentを追加するか。
         neo4j_mcp_command: Neo4j MCPサーバーの起動コマンド。
         enable_ops: 運用支援Agent群を追加するか。
+        enable_extended: 拡張Agent群（レポート・シミュレーション）を追加するか。
 
     Returns:
         設定済みのAgno Team
@@ -70,6 +76,12 @@ def create_shift_team(
         compliance = create_compliance_agent(mcp_server_command)
         handover = create_handover_agent(mcp_server_command)
         members.extend([monitoring, compliance, handover])
+
+    # Optional: Extended Agents (Phase D)
+    if enable_extended:
+        report = create_report_agent(mcp_server_command)
+        simulation = create_simulation_agent(mcp_server_command)
+        members.extend([report, simulation])
 
     # --- Memory configuration ---
     db = None
@@ -107,6 +119,13 @@ def create_shift_team(
             f"{member_num + 1}. コンプライアンスAgent: 人員配置基準の充足チェック",
             f"{member_num + 2}. 引き継ぎAgent: スタッフの人事異動対応と設定更新",
         ])
+        member_num += 3
+
+    if enable_extended:
+        base_instructions.extend([
+            f"{member_num}. レポートAgent: 月次総合レポートの生成（品質スコア付き）",
+            f"{member_num + 1}. シミュレーションAgent: What-ifシナリオの影響分析",
+        ])
 
     base_instructions.extend([
         "",
@@ -141,6 +160,16 @@ def create_shift_team(
             "",
             "● スタッフの入退社・異動・条件変更 → 引き継ぎAgent",
             "  例: 「新しいスタッフが入った」「○○さんが退職する」「セクション異動」",
+        ])
+
+    if enable_extended:
+        base_instructions.extend([
+            "",
+            "● 月次レポート・総合評価 → レポートAgent",
+            "  例: 「今月のレポートを作って」「シフトの品質評価は？」",
+            "",
+            "● What-ifシミュレーション → シミュレーションAgent",
+            "  例: 「もし○○さんが辞めたら？」「利用者が増えたら？」「パートを増やしたら？」",
         ])
 
     base_instructions.extend([

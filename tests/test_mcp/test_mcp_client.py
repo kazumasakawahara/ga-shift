@@ -39,13 +39,14 @@ class TestMCPToolDiscovery:
         tools = await client.list_tools()
         tool_names = sorted(t.name for t in tools)
 
-        assert len(tools) == 13
+        assert len(tools) == 15
         assert tool_names == [
             "add_constraint",
             "adjust_schedule",
             "analyze_schedule_balance",
             "check_compliance",
             "explain_result",
+            "generate_shift_report",
             "generate_shift_template",
             "get_accompanied_visits",
             "get_staffing_requirements",
@@ -53,6 +54,7 @@ class TestMCPToolDiscovery:
             "list_constraints",
             "run_optimization",
             "setup_facility",
+            "simulate_scenario",
             "transfer_staff",
         ]
 
