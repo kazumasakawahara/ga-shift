@@ -664,6 +664,155 @@ def check_compliance(
 
 
 # ---------------------------------------------------------------------------
+# Tool 9: import_accompanied_visits
+# ---------------------------------------------------------------------------
+@mcp.tool
+def import_accompanied_visits(
+    visits: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """利用者の通院同行スケジュールをシフト制約として一括登録します.
+
+    support-db（Neo4j）から取得した利用者の通院予定と
+    同行スタッフの情報を、GA-shiftの出勤制約に変換します。
+
+    Args:
+        visits: 通院同行情報のリスト。各要素は以下の形式:
+            {
+                "client_name": "山田健太",       # 利用者名
+                "staff_name": "川崎聡",          # 同行スタッフ名
+                "day": 15,                       # 通院日（1-indexed）
+                "visit_type": "定期通院",        # "定期通院" or "臨時通院"
+                "hospital": "○○病院",            # 通院先（任意）
+                "note": "精神科の定期受診"        # メモ（任意）
+            }
+
+    Returns:
+        登録結果のサマリー
+    """
+    if not _facility_state.get("staff"):
+        return {
+            "status": "error",
+            "message": "事業所が未設定です。先に setup_facility を実行してください。",
+        }
+
+    registered = []
+    errors = []
+    staff_names = {s["name"] for s in _facility_state["staff"]}
+
+    for visit in visits:
+        staff_name = visit.get("staff_name", "")
+        client_name = visit.get("client_name", "")
+        day = visit.get("day", 0)
+        visit_type = visit.get("visit_type", "通院同行")
+        hospital = visit.get("hospital", "")
+        note = visit.get("note", "")
+
+        # Validate staff exists in facility
+        if staff_name not in staff_names:
+            errors.append(
+                f"スタッフ '{staff_name}' は事業所に登録されていません"
+            )
+            continue
+
+        # Validate day
+        if day < 1 or day > 31:
+            errors.append(f"日付 {day} は範囲外です（1-31）")
+            continue
+
+        # Store in facility state as accompanied visit constraint
+        if "accompanied_visits" not in _facility_state:
+            _facility_state["accompanied_visits"] = []
+
+        visit_record = {
+            "client_name": client_name,
+            "staff_name": staff_name,
+            "day": day,
+            "visit_type": visit_type,
+            "hospital": hospital,
+            "note": note,
+            "constraint_type": "must_work",  # 同行日は出勤必須
+        }
+        _facility_state["accompanied_visits"].append(visit_record)
+        registered.append(visit_record)
+
+    return {
+        "status": "ok",
+        "registered_count": len(registered),
+        "error_count": len(errors),
+        "registered": [
+            {
+                "staff": v["staff_name"],
+                "client": v["client_name"],
+                "day": v["day"],
+                "type": v["visit_type"],
+            }
+            for v in registered
+        ],
+        "errors": errors,
+        "total_accompanied_visits": len(
+            _facility_state.get("accompanied_visits", [])
+        ),
+        "message": (
+            f"{len(registered)}件の通院同行をシフト制約に登録しました。"
+            if registered
+            else "登録できる通院同行がありませんでした。"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool 10: get_accompanied_visits
+# ---------------------------------------------------------------------------
+@mcp.tool
+def get_accompanied_visits() -> dict[str, Any]:
+    """登録済みの通院同行スケジュールを一覧表示します.
+
+    import_accompanied_visits で登録された通院同行制約の
+    一覧を返します。
+
+    Returns:
+        登録済み通院同行の一覧
+    """
+    visits = _facility_state.get("accompanied_visits", [])
+
+    # Group by staff
+    by_staff: dict[str, list[dict[str, Any]]] = {}
+    for v in visits:
+        staff = v["staff_name"]
+        if staff not in by_staff:
+            by_staff[staff] = []
+        by_staff[staff].append(v)
+
+    staff_summary = []
+    for staff_name, staff_visits in by_staff.items():
+        staff_summary.append(
+            {
+                "staff_name": staff_name,
+                "visit_count": len(staff_visits),
+                "days": [v["day"] for v in staff_visits],
+                "clients": list({v["client_name"] for v in staff_visits}),
+            }
+        )
+
+    return {
+        "status": "ok",
+        "total_visits": len(visits),
+        "visits": [
+            {
+                "staff": v["staff_name"],
+                "client": v["client_name"],
+                "day": v["day"],
+                "type": v["visit_type"],
+                "hospital": v.get("hospital", ""),
+                "note": v.get("note", ""),
+            }
+            for v in visits
+        ],
+        "by_staff": staff_summary,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

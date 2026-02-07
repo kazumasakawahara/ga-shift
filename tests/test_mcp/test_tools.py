@@ -23,6 +23,8 @@ from ga_shift.mcp.server import (
     check_compliance as _check_compliance_tool,
     explain_result as _explain_result_tool,
     generate_shift_template as _generate_shift_template_tool,
+    get_accompanied_visits as _get_accompanied_visits_tool,
+    import_accompanied_visits as _import_accompanied_visits_tool,
     list_constraints as _list_constraints_tool,
     run_optimization as _run_optimization_tool,
     setup_facility as _setup_facility_tool,
@@ -41,6 +43,8 @@ run_optimization = _unwrap(_run_optimization_tool)
 explain_result = _unwrap(_explain_result_tool)
 adjust_schedule = _unwrap(_adjust_schedule_tool)
 check_compliance = _unwrap(_check_compliance_tool)
+import_accompanied_visits = _unwrap(_import_accompanied_visits_tool)
+get_accompanied_visits = _unwrap(_get_accompanied_visits_tool)
 
 
 # ---------------------------------------------------------------------------
@@ -403,3 +407,246 @@ class TestCheckCompliance:
             assert "constraint" in v
             assert "message" in v
             assert "severity" in v
+
+
+# ===================================================================
+# Tool 9: import_accompanied_visits
+# ===================================================================
+class TestImportAccompaniedVisits:
+    def test_import_without_facility(self):
+        """事業所未設定でエラーが返ること。"""
+        result = import_accompanied_visits(
+            visits=[{
+                "client_name": "山田健太",
+                "staff_name": "川崎聡",
+                "day": 15,
+                "visit_type": "定期通院",
+            }]
+        )
+        assert result["status"] == "error"
+        assert "事業所が未設定" in result["message"]
+
+    def test_import_basic(self, kimachiya_staff):
+        """基本的な通院同行の登録ができること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = import_accompanied_visits(
+            visits=[{
+                "client_name": "山田健太",
+                "staff_name": "川崎聡",
+                "day": 15,
+                "visit_type": "定期通院",
+                "hospital": "○○病院",
+                "note": "精神科の定期受診",
+            }]
+        )
+        assert result["status"] == "ok"
+        assert result["registered_count"] == 1
+        assert result["error_count"] == 0
+        assert result["total_accompanied_visits"] == 1
+
+    def test_import_multiple_visits(self, kimachiya_staff):
+        """複数の通院同行を一括登録できること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = import_accompanied_visits(
+            visits=[
+                {
+                    "client_name": "山田健太",
+                    "staff_name": "川崎聡",
+                    "day": 10,
+                    "visit_type": "定期通院",
+                },
+                {
+                    "client_name": "佐藤花子",
+                    "staff_name": "斎藤駿児",
+                    "day": 15,
+                    "visit_type": "臨時通院",
+                },
+                {
+                    "client_name": "田中一郎",
+                    "staff_name": "平田園美",
+                    "day": 20,
+                    "visit_type": "定期通院",
+                },
+            ]
+        )
+        assert result["status"] == "ok"
+        assert result["registered_count"] == 3
+        assert result["error_count"] == 0
+        assert result["total_accompanied_visits"] == 3
+
+    def test_import_invalid_staff(self, kimachiya_staff):
+        """存在しないスタッフ名でエラーが返ること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = import_accompanied_visits(
+            visits=[{
+                "client_name": "山田健太",
+                "staff_name": "存在しないスタッフ",
+                "day": 15,
+                "visit_type": "定期通院",
+            }]
+        )
+        assert result["status"] == "ok"
+        assert result["registered_count"] == 0
+        assert result["error_count"] == 1
+        assert "登録されていません" in result["errors"][0]
+
+    def test_import_invalid_day(self, kimachiya_staff):
+        """範囲外の日付でエラーが返ること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = import_accompanied_visits(
+            visits=[{
+                "client_name": "山田健太",
+                "staff_name": "川崎聡",
+                "day": 32,
+                "visit_type": "定期通院",
+            }]
+        )
+        assert result["status"] == "ok"
+        assert result["registered_count"] == 0
+        assert result["error_count"] == 1
+        assert "範囲外" in result["errors"][0]
+
+    def test_import_mixed_valid_invalid(self, kimachiya_staff):
+        """有効・無効が混在する場合の部分登録。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = import_accompanied_visits(
+            visits=[
+                {
+                    "client_name": "山田健太",
+                    "staff_name": "川崎聡",
+                    "day": 10,
+                    "visit_type": "定期通院",
+                },
+                {
+                    "client_name": "佐藤花子",
+                    "staff_name": "存在しない人",
+                    "day": 15,
+                    "visit_type": "臨時通院",
+                },
+            ]
+        )
+        assert result["status"] == "ok"
+        assert result["registered_count"] == 1
+        assert result["error_count"] == 1
+
+    def test_import_accumulates(self, kimachiya_staff):
+        """複数回のインポートで蓄積されること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        import_accompanied_visits(
+            visits=[{
+                "client_name": "山田健太",
+                "staff_name": "川崎聡",
+                "day": 10,
+                "visit_type": "定期通院",
+            }]
+        )
+        result = import_accompanied_visits(
+            visits=[{
+                "client_name": "佐藤花子",
+                "staff_name": "斎藤駿児",
+                "day": 15,
+                "visit_type": "臨時通院",
+            }]
+        )
+        assert result["total_accompanied_visits"] == 2
+
+    def test_import_empty_list(self, kimachiya_staff):
+        """空リストで登録0件が返ること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = import_accompanied_visits(visits=[])
+        assert result["status"] == "ok"
+        assert result["registered_count"] == 0
+
+
+# ===================================================================
+# Tool 10: get_accompanied_visits
+# ===================================================================
+class TestGetAccompaniedVisits:
+    def test_get_empty(self):
+        """登録なしの場合、空リストが返ること。"""
+        result = get_accompanied_visits()
+        assert result["status"] == "ok"
+        assert result["total_visits"] == 0
+        assert result["visits"] == []
+
+    def test_get_after_import(self, kimachiya_staff):
+        """登録後に一覧が取得できること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        import_accompanied_visits(
+            visits=[
+                {
+                    "client_name": "山田健太",
+                    "staff_name": "川崎聡",
+                    "day": 10,
+                    "visit_type": "定期通院",
+                    "hospital": "A病院",
+                },
+                {
+                    "client_name": "佐藤花子",
+                    "staff_name": "川崎聡",
+                    "day": 20,
+                    "visit_type": "臨時通院",
+                },
+            ]
+        )
+        result = get_accompanied_visits()
+        assert result["status"] == "ok"
+        assert result["total_visits"] == 2
+        assert len(result["visits"]) == 2
+
+    def test_get_by_staff_grouping(self, kimachiya_staff):
+        """スタッフ別グループが正しいこと。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        import_accompanied_visits(
+            visits=[
+                {
+                    "client_name": "山田健太",
+                    "staff_name": "川崎聡",
+                    "day": 10,
+                    "visit_type": "定期通院",
+                },
+                {
+                    "client_name": "佐藤花子",
+                    "staff_name": "川崎聡",
+                    "day": 20,
+                    "visit_type": "臨時通院",
+                },
+                {
+                    "client_name": "田中一郎",
+                    "staff_name": "斎藤駿児",
+                    "day": 15,
+                    "visit_type": "定期通院",
+                },
+            ]
+        )
+        result = get_accompanied_visits()
+        assert len(result["by_staff"]) == 2
+
+        # Find kawasaki's entry
+        kawasaki = next(
+            s for s in result["by_staff"] if s["staff_name"] == "川崎聡"
+        )
+        assert kawasaki["visit_count"] == 2
+        assert set(kawasaki["days"]) == {10, 20}
+
+    def test_get_visit_has_required_fields(self, kimachiya_staff):
+        """各visitに必須フィールドがあること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        import_accompanied_visits(
+            visits=[{
+                "client_name": "山田健太",
+                "staff_name": "川崎聡",
+                "day": 10,
+                "visit_type": "定期通院",
+                "hospital": "A病院",
+                "note": "テスト",
+            }]
+        )
+        result = get_accompanied_visits()
+        visit = result["visits"][0]
+        assert "staff" in visit
+        assert "client" in visit
+        assert "day" in visit
+        assert "type" in visit
+        assert "hospital" in visit
+        assert "note" in visit

@@ -35,17 +35,19 @@ async def client():
 class TestMCPToolDiscovery:
     @pytest.mark.asyncio
     async def test_list_tools(self, client: Client):
-        """全8ツールが登録されていること。"""
+        """全10ツールが登録されていること。"""
         tools = await client.list_tools()
         tool_names = sorted(t.name for t in tools)
 
-        assert len(tools) == 8
+        assert len(tools) == 10
         assert tool_names == [
             "add_constraint",
             "adjust_schedule",
             "check_compliance",
             "explain_result",
             "generate_shift_template",
+            "get_accompanied_visits",
+            "import_accompanied_visits",
             "list_constraints",
             "run_optimization",
             "setup_facility",
