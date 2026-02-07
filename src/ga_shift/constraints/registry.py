@@ -86,6 +86,7 @@ def _create_default_registry() -> ConstraintRegistry:
         EqualWeekendDistribution,
     )
     from ga_shift.constraints.kimachi_constraints import (
+        ClosedDayConstraint,
         KitchenMinWorkers,
         SubstituteConstraint,
         UnavailableDayHard,
@@ -123,6 +124,7 @@ def _create_default_registry() -> ConstraintRegistry:
         SubstituteConstraint,
         VacationDaysLimit,
         UnavailableDayHard,
+        ClosedDayConstraint,
     ]:
         registry.register(template_cls())
     return registry

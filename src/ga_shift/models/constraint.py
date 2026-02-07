@@ -122,5 +122,15 @@ class ConstraintSet(BaseModel):
                     template_id="equal_weekend_distribution",
                     parameters={"max_diff": 2, "penalty_per_diff": 5.0},
                 ),
+                # Closed day (定休日: 土日)
+                ConstraintConfig(
+                    template_id="closed_day",
+                    parameters={
+                        "closed_weekdays": "5,6",
+                        "override_open_days": "",
+                        "penalty_closed_day": 500.0,
+                        "penalty_parttime_override": 100.0,
+                    },
+                ),
             ],
         )

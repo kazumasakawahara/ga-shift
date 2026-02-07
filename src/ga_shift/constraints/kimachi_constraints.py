@@ -5,6 +5,7 @@ Constraints for the Kimachiya cafe restaurant kitchen shift scheduling:
 2. SubstituteConstraint - Saito must cover Shimamura's absences (esp. Wednesday)
 3. VacationDaysLimit - Don't exceed available paid leave
 4. UnavailableDayHard - Code-3 cells must never be changed to work
+5. ClosedDayConstraint - 定休日（土日）のハード制約 + 臨時出勤（研修等）対応
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import numpy as np
 
 from ga_shift.constraints.base import ConstraintTemplate, PenaltyFunction, PenaltyResult
 from ga_shift.models.constraint import ParameterDef, ParameterType
-from ga_shift.models.employee import Section
+from ga_shift.models.employee import EmployeeType, Section
 from ga_shift.models.schedule import ScheduleContext
 
 
@@ -311,6 +312,159 @@ class UnavailableDayHard(ConstraintTemplate):
                             total_penalty += penalty_per
                             details_parts.append(
                                 f"{emp.name}: {day_idx}日が出勤不可なのに出勤"
+                            )
+
+            return PenaltyResult(
+                penalty=total_penalty, details="; ".join(details_parts)
+            )
+
+        return penalty_fn
+
+
+class ClosedDayConstraint(ConstraintTemplate):
+    """定休日（土日）のハード制約 + 臨時出勤（研修会場等）対応.
+
+    木町家は土日が定休日だが、研修会場として使用する場合など
+    臨時的に正規職員が出勤するケースがある。
+
+    動作:
+    - 通常の定休日（土日）: 全員休み。出勤にはハードペナルティ。
+    - 臨時営業日（override_open_days で指定）:
+        - 正規職員(FULL_TIME)は出勤可能 → ペナルティなし
+        - パート(PART_TIME)の出勤 → ソフトペナルティ
+    """
+
+    @property
+    def template_id(self) -> str:
+        return "closed_day"
+
+    @property
+    def name_ja(self) -> str:
+        return "定休日制約（土日）"
+
+    @property
+    def category(self) -> str:
+        return "day"
+
+    @property
+    def description(self) -> str:
+        return (
+            "土日は定休日として全員休み。研修等の臨時営業日は"
+            "正規職員のみ出勤可（パート不可）"
+        )
+
+    @property
+    def parameters(self) -> list[ParameterDef]:
+        return [
+            ParameterDef(
+                name="closed_weekdays",
+                display_name="定休曜日",
+                param_type=ParameterType.SELECT,
+                default="5,6",
+                description="定休日の曜日インデックス（カンマ区切り）。5=土, 6=日",
+            ),
+            ParameterDef(
+                name="override_open_days",
+                display_name="臨時営業日",
+                param_type=ParameterType.SELECT,
+                default="",
+                description=(
+                    "臨時的に営業する日（1始まりの日番号、カンマ区切り）。"
+                    "研修会場として使用する場合など"
+                ),
+            ),
+            ParameterDef(
+                name="penalty_closed_day",
+                display_name="定休日出勤ペナルティ",
+                param_type=ParameterType.FLOAT,
+                default=500.0,
+                min_value=50.0,
+                max_value=5000.0,
+                description="通常の定休日に出勤が入った場合のペナルティ（ハード）",
+            ),
+            ParameterDef(
+                name="penalty_parttime_override",
+                display_name="臨時日パート出勤ペナルティ",
+                param_type=ParameterType.FLOAT,
+                default=100.0,
+                min_value=10.0,
+                max_value=1000.0,
+                description="臨時営業日にパートが出勤した場合のペナルティ",
+            ),
+        ]
+
+    def compile(self, params: dict[str, Any]) -> PenaltyFunction:
+        # Parse closed weekdays (e.g. "5,6" → [5, 6])
+        closed_str = str(params.get("closed_weekdays", "5,6")).strip()
+        closed_weekdays: list[int] = []
+        if closed_str:
+            closed_weekdays = [
+                int(x.strip()) for x in closed_str.split(",") if x.strip()
+            ]
+
+        # Parse override open days (e.g. "8,15" → [8, 15])
+        override_str = str(params.get("override_open_days", "")).strip()
+        override_days_1indexed: set[int] = set()
+        if override_str:
+            override_days_1indexed = {
+                int(x.strip()) for x in override_str.split(",") if x.strip()
+            }
+
+        penalty_closed = float(params["penalty_closed_day"])
+        penalty_parttime = float(params["penalty_parttime_override"])
+
+        def penalty_fn(ctx: ScheduleContext) -> PenaltyResult:
+            weekdays = ctx.shift_input.weekdays
+            if not weekdays or not closed_weekdays:
+                return PenaltyResult()
+
+            # Find closed day indices (0-based) in the schedule
+            closed_day_indices = [
+                d for d, w in enumerate(weekdays) if w in closed_weekdays
+            ]
+            if not closed_day_indices:
+                return PenaltyResult()
+
+            # Convert override days from 1-indexed to 0-indexed
+            override_set_0indexed = {d - 1 for d in override_days_1indexed}
+
+            # Build employee type lookup
+            emp_types: dict[int, EmployeeType] = {}
+            for emp in ctx.shift_input.employees:
+                emp_types[emp.index] = emp.employee_type
+
+            binary = ctx.binary_schedule
+            total_penalty = 0.0
+            details_parts: list[str] = []
+
+            for day_idx in closed_day_indices:
+                is_override = day_idx in override_set_0indexed
+                day_num = day_idx + 1  # 1-indexed for display
+
+                for emp_idx in range(ctx.num_employees):
+                    if binary[emp_idx, day_idx] == 0:  # working
+                        if is_override:
+                            # 臨時営業日: 正規職員は OK、パートはペナルティ
+                            emp_type = emp_types.get(
+                                emp_idx, EmployeeType.FULL_TIME
+                            )
+                            if emp_type == EmployeeType.PART_TIME:
+                                total_penalty += penalty_parttime
+                                emp_name = (
+                                    ctx.shift_input.employee_names[emp_idx]
+                                )
+                                details_parts.append(
+                                    f"{day_num}日(臨時営業): "
+                                    f"{emp_name}(パート)は出勤不可"
+                                )
+                        else:
+                            # 通常の定休日: 誰も出勤してはいけない
+                            total_penalty += penalty_closed
+                            emp_name = (
+                                ctx.shift_input.employee_names[emp_idx]
+                            )
+                            details_parts.append(
+                                f"{day_num}日(定休日): {emp_name}が出勤"
                             )
 
             return PenaltyResult(
