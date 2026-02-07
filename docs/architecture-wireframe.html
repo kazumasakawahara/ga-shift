@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GA-shift アーキテクチャ ワイヤーフレーム — フェーズA〜D</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f8f9fa;
+    --card-bg: #ffffff;
+    --primary: #2563eb;
+    --primary-light: #dbeafe;
+    --accent-a: #059669;
+    --accent-b: #7c3aed;
+    --accent-c: #d97706;
+    --accent-d: #dc2626;
+    --border: #e5e7eb;
+    --text: #1f2937;
+    --text-muted: #6b7280;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 32px 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.8rem;
+    text-align: center;
+    margin-bottom: 8px;
+    color: var(--primary);
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    margin-bottom: 32px;
+  }
+  .stats-bar {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 36px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 28px;
+    text-align: center;
+    min-width: 140px;
+  }
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--primary);
+  }
+  .stat-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  section {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 28px;
+  }
+  h2 {
+    font-size: 1.35rem;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2 .badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+    color: white;
+  }
+  .badge-a { background: var(--accent-a); }
+  .badge-b { background: var(--accent-b); }
+  .badge-c { background: var(--accent-c); }
+  .badge-d { background: var(--accent-d); }
+  .badge-core { background: var(--primary); }
+  h3 {
+    font-size: 1.1rem;
+    margin: 20px 0 10px;
+    color: var(--text);
+    border-left: 4px solid var(--primary);
+    padding-left: 12px;
+  }
+  .mermaid {
+    margin: 16px 0;
+    text-align: center;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 0.92rem;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    text-align: left;
+  }
+  th {
+    background: var(--primary-light);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .file-path {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    color: var(--primary);
+  }
+  .desc { color: var(--text-muted); font-size: 0.88rem; }
+  .timeline {
+    display: flex;
+    gap: 0;
+    margin: 20px 0;
+    flex-wrap: wrap;
+  }
+  .timeline-item {
+    flex: 1;
+    min-width: 200px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    position: relative;
+    background: var(--card-bg);
+  }
+  .timeline-item:first-child { border-radius: 12px 0 0 12px; }
+  .timeline-item:last-child { border-radius: 0 12px 12px 0; }
+  .timeline-item .phase-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    display: inline-block;
+    margin-bottom: 6px;
+  }
+  .timeline-item h4 {
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+  }
+  .timeline-item p {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+  }
+  .commit-hash {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--accent-b);
+  }
+  .test-count {
+    font-family: monospace;
+    font-weight: 700;
+    color: var(--accent-a);
+  }
+  .footer {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<h1>GA-shift アーキテクチャ ワイヤーフレーム</h1>
+<p class="subtitle">Agno + MCP 統合アーキテクチャ — フェーズA〜D 実装完了</p>
+
+<!-- ===== Stats Bar ===== -->
+<div class="stats-bar">
+  <div class="stat">
+    <div class="stat-value">9</div>
+    <div class="stat-label">Agno Agents</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">15</div>
+    <div class="stat-label">MCP Tools</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">259</div>
+    <div class="stat-label">Tests Passed</div>
+  </div>
+  <div class="stat">
+    <div class="stat-value">6</div>
+    <div class="stat-label">Commits</div>
+  </div>
+</div>
+
+<!-- ===== Section 1: 全体アーキテクチャ ===== -->
+<section>
+  <h2>全体アーキテクチャ <span class="badge badge-core">概要</span></h2>
+  <div class="mermaid">
+graph TB
+    subgraph UI["Streamlit Chat UI"]
+        ChatApp["chat_app.py"]
+    end
+
+    subgraph TEAM["Agno Team (最大9 Agent)"]
+        direction TB
+        Leader["Team Leader<br/>Claude Sonnet 4.5"]
+
+        subgraph CORE["コアAgent (Phase 1-3)"]
+            H["ヒアリング<br/>Agent"]
+            O["最適化<br/>Agent"]
+            A["調整<br/>Agent"]
+        end
+
+        subgraph PHASEB["Phase B: Neo4j連携"]
+            N4J["Neo4jブリッジ<br/>Agent"]
+        end
+
+        subgraph PHASEC["Phase C: 運用支援"]
+            MON["モニタリング<br/>Agent"]
+            COM["コンプライアンス<br/>Agent"]
+            HAN["引き継ぎ<br/>Agent"]
+        end
+
+        subgraph PHASED["Phase D: 拡張"]
+            REP["レポート<br/>Agent"]
+            SIM["シミュレーション<br/>Agent"]
+        end
+
+        Leader --> CORE
+        Leader --> PHASEB
+        Leader --> PHASEC
+        Leader --> PHASED
+    end
+
+    subgraph MCP["MCP Server (FastMCP)"]
+        direction TB
+        T1["setup_facility"]
+        T2["generate_shift_template"]
+        T3["add/list_constraint"]
+        T4["run_optimization"]
+        T5["explain_result"]
+        T6["adjust_schedule"]
+        T7["check_compliance"]
+        T8["import/get_visits"]
+        T9["analyze_balance"]
+        T10["get_staffing_req"]
+        T11["transfer_staff"]
+        T12["generate_report"]
+        T13["simulate_scenario"]
+    end
+
+    subgraph ENGINE["GA Engine"]
+        GA["遺伝的アルゴリズム"]
+        CONS["制約レジストリ"]
+        IO["Excel I/O"]
+    end
+
+    subgraph EXTERNAL["外部連携"]
+        NEO["Neo4j<br/>support-db"]
+        EXCEL["Excel<br/>ファイル"]
+    end
+
+    ChatApp --> Leader
+    CORE --> MCP
+    PHASEB --> MCP
+    PHASEC --> MCP
+    PHASED --> MCP
+    N4J -.-> NEO
+    MCP --> ENGINE
+    ENGINE --> EXCEL
+  </div>
+</section>
+
+<!-- ===== Section 2: 実装タイムライン ===== -->
+<section>
+  <h2>実装タイムライン</h2>
+  <div class="timeline">
+    <div class="timeline-item" style="border-left: 4px solid var(--primary);">
+      <span class="phase-badge" style="background:var(--primary)">Phase 1-3</span>
+      <h4>Agno + MCP 基盤</h4>
+      <p>MCPサーバー10ツール、コアAgent3種、Streamlit Chat UI</p>
+      <p><span class="commit-hash">f9bad6b</span> + <span class="commit-hash">464353a</span></p>
+    </div>
+    <div class="timeline-item" style="border-left: 4px solid var(--accent-a);">
+      <span class="phase-badge badge-a">Phase A</span>
+      <h4>テスト強化</h4>
+      <p>全113テスト合格、制約・GA・IO・MCP・Agnoの包括的テスト</p>
+      <p><span class="commit-hash">ea0aae2</span> <span class="test-count">113 tests</span></p>
+    </div>
+    <div class="timeline-item" style="border-left: 4px solid var(--accent-b);">
+      <span class="phase-badge badge-b">Phase B</span>
+      <h4>Neo4j 連携</h4>
+      <p>Neo4jブリッジAgent、通院同行MCPツール2種</p>
+      <p><span class="commit-hash">5fdde75</span> <span class="test-count">148 tests</span></p>
+    </div>
+    <div class="timeline-item" style="border-left: 4px solid var(--accent-c);">
+      <span class="phase-badge badge-c">Phase C</span>
+      <h4>運用支援</h4>
+      <p>モニタリング・コンプライアンス・引き継ぎAgent + MCPツール3種</p>
+      <p><span class="commit-hash">9818e5b</span> <span class="test-count">206 tests</span></p>
+    </div>
+    <div class="timeline-item" style="border-left: 4px solid var(--accent-d);">
+      <span class="phase-badge badge-d">Phase D</span>
+      <h4>拡張エージェント</h4>
+      <p>レポート・シミュレーションAgent + MCPツール2種</p>
+      <p><span class="commit-hash">3e32e0f</span> <span class="test-count">259 tests</span></p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== Section 3: Agent一覧 ===== -->
+<section>
+  <h2>Agno Agent 一覧 (9 Agents)</h2>
+  <table>
+    <tr>
+      <th>Phase</th>
+      <th>Agent</th>
+      <th>ID</th>
+      <th>役割</th>
+      <th>ファイル</th>
+    </tr>
+    <tr>
+      <td><span class="badge badge-core" style="font-size:0.7rem">Core</span></td>
+      <td>ヒアリングAgent</td>
+      <td><code>hearing-agent</code></td>
+      <td class="desc">事業所情報の収集・設定</td>
+      <td class="file-path">agno_agents/hearing.py</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-core" style="font-size:0.7rem">Core</span></td>
+      <td>最適化Agent</td>
+      <td><code>optimizer-agent</code></td>
+      <td class="desc">テンプレート生成・GA最適化実行</td>
+      <td class="file-path">agno_agents/optimizer.py</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-core" style="font-size:0.7rem">Core</span></td>
+      <td>調整Agent</td>
+      <td><code>adjuster-agent</code></td>
+      <td class="desc">結果説明・手動調整</td>
+      <td class="file-path">agno_agents/adjuster.py</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-b" style="font-size:0.7rem">B</span></td>
+      <td>Neo4jブリッジAgent</td>
+      <td><code>neo4j-bridge-agent</code></td>
+      <td class="desc">support-db通院情報→シフト制約変換</td>
+      <td class="file-path">agno_agents/neo4j_bridge.py</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-c" style="font-size:0.7rem">C</span></td>
+      <td>モニタリングAgent</td>
+      <td><code>monitoring-agent</code></td>
+      <td class="desc">シフト公平性・偏り分析</td>
+      <td class="file-path">agno_agents/monitoring.py</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-c" style="font-size:0.7rem">C</span></td>
+      <td>コンプライアンスAgent</td>
+      <td><code>compliance-agent</code></td>
+      <td class="desc">人員配置基準チェック</td>
+      <td class="file-path">agno_agents/compliance.py</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-c" style="font-size:0.7rem">C</span></td>
+      <td>引き継ぎAgent</td>
+      <td><code>handover-agent</code></td>
+      <td class="desc">人事異動・入退社対応</td>
+      <td class="file-path">agno_agents/handover.py</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-d" style="font-size:0.7rem">D</span></td>
+      <td>レポートAgent</td>
+      <td><code>report-agent</code></td>
+      <td class="desc">月次総合レポート（品質スコア付き）</td>
+      <td class="file-path">agno_agents/report.py</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-d" style="font-size:0.7rem">D</span></td>
+      <td>シミュレーションAgent</td>
+      <td><code>simulation-agent</code></td>
+      <td class="desc">What-ifシナリオ影響分析</td>
+      <td class="file-path">agno_agents/simulation.py</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ===== Section 4: MCP Tools ===== -->
+<section>
+  <h2>MCP ツール一覧 (15 Tools)</h2>
+  <table>
+    <tr>
+      <th>#</th>
+      <th>ツール名</th>
+      <th>Phase</th>
+      <th>機能</th>
+      <th>主な利用Agent</th>
+    </tr>
+    <tr><td>1</td><td><code>setup_facility</code></td><td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td><td class="desc">事業所の初期設定</td><td>ヒアリング</td></tr>
+    <tr><td>2</td><td><code>add_constraint</code></td><td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td><td class="desc">制約条件の追加</td><td>ヒアリング</td></tr>
+    <tr><td>3</td><td><code>list_constraints</code></td><td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td><td class="desc">制約一覧の取得</td><td>ヒアリング</td></tr>
+    <tr><td>4</td><td><code>generate_shift_template</code></td><td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td><td class="desc">Excelテンプレート生成</td><td>最適化</td></tr>
+    <tr><td>5</td><td><code>run_optimization</code></td><td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td><td class="desc">GA最適化の実行</td><td>最適化</td></tr>
+    <tr><td>6</td><td><code>explain_result</code></td><td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td><td class="desc">シフト結果の説明</td><td>調整</td></tr>
+    <tr><td>7</td><td><code>adjust_schedule</code></td><td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td><td class="desc">手動シフト調整</td><td>調整</td></tr>
+    <tr><td>8</td><td><code>check_compliance</code></td><td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td><td class="desc">人員配置基準チェック</td><td>コンプライアンス</td></tr>
+    <tr><td>9</td><td><code>import_accompanied_visits</code></td><td><span class="badge badge-b" style="font-size:0.65rem">B</span></td><td class="desc">通院同行情報の取り込み</td><td>Neo4jブリッジ</td></tr>
+    <tr><td>10</td><td><code>get_accompanied_visits</code></td><td><span class="badge badge-b" style="font-size:0.65rem">B</span></td><td class="desc">通院同行一覧の取得</td><td>Neo4jブリッジ</td></tr>
+    <tr><td>11</td><td><code>analyze_schedule_balance</code></td><td><span class="badge badge-c" style="font-size:0.65rem">C</span></td><td class="desc">シフト公平性分析</td><td>モニタリング</td></tr>
+    <tr><td>12</td><td><code>get_staffing_requirements</code></td><td><span class="badge badge-c" style="font-size:0.65rem">C</span></td><td class="desc">人員配置基準の取得</td><td>コンプライアンス</td></tr>
+    <tr><td>13</td><td><code>transfer_staff</code></td><td><span class="badge badge-c" style="font-size:0.65rem">C</span></td><td class="desc">スタッフ異動処理</td><td>引き継ぎ</td></tr>
+    <tr><td>14</td><td><code>generate_shift_report</code></td><td><span class="badge badge-d" style="font-size:0.65rem">D</span></td><td class="desc">総合レポート生成（スコア付き）</td><td>レポート</td></tr>
+    <tr><td>15</td><td><code>simulate_scenario</code></td><td><span class="badge badge-d" style="font-size:0.65rem">D</span></td><td class="desc">What-ifシミュレーション</td><td>シミュレーション</td></tr>
+  </table>
+</section>
+
+<!-- ===== Section 5: Agent連携フロー ===== -->
+<section>
+  <h2>Agent連携フロー <span class="badge badge-core">ルーティング</span></h2>
+  <div class="mermaid">
+flowchart LR
+    User["ユーザー"] --> Leader["Team Leader"]
+
+    Leader -->|"初回・事業所設定"| H["ヒアリング"]
+    Leader -->|"テンプレート・最適化"| O["最適化"]
+    Leader -->|"結果確認・調整"| A["調整"]
+    Leader -->|"通院情報"| N4J["Neo4jブリッジ"]
+    Leader -->|"偏り分析"| MON["モニタリング"]
+    Leader -->|"基準チェック"| COM["コンプライアンス"]
+    Leader -->|"入退社・異動"| HAN["引き継ぎ"]
+    Leader -->|"月次レポート"| REP["レポート"]
+    Leader -->|"What-if分析"| SIM["シミュレーション"]
+
+    H --> MCP["MCP Server"]
+    O --> MCP
+    A --> MCP
+    N4J --> MCP
+    MON --> MCP
+    COM --> MCP
+    HAN --> MCP
+    REP --> MCP
+    SIM --> MCP
+
+    MCP --> GA["GA Engine"]
+    MCP --> EXCEL["Excel I/O"]
+    N4J -.->|"Neo4j MCP"| NEO["support-db"]
+  </div>
+</section>
+
+<!-- ===== Section 6: テスト構成 ===== -->
+<section>
+  <h2>テスト構成 <span class="test-count">259 tests</span></h2>
+  <div class="mermaid">
+pie title テスト内訳（259件）
+    "制約テスト" : 42
+    "GAエンジン" : 20
+    "Excel I/O" : 15
+    "MCPツール単体" : 126
+    "MCPクライアント" : 6
+    "Agnoコア" : 14
+    "Agno Neo4j" : 9
+    "Agno運用" : 35
+    "Agno拡張" : 27
+  </div>
+
+  <table>
+    <tr>
+      <th>テストディレクトリ</th>
+      <th>対象</th>
+      <th>テスト数</th>
+      <th>Phase</th>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_constraints/</td>
+      <td class="desc">制約レジストリ、日次・パターン・公平性・木町家制約</td>
+      <td><span class="test-count">~42</span></td>
+      <td><span class="badge badge-a" style="font-size:0.65rem">A</span></td>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_ga/</td>
+      <td class="desc">GAエンジン、遺伝子操作</td>
+      <td><span class="test-count">~20</span></td>
+      <td><span class="badge badge-a" style="font-size:0.65rem">A</span></td>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_io/</td>
+      <td class="desc">Excel読み書き</td>
+      <td><span class="test-count">~15</span></td>
+      <td><span class="badge badge-a" style="font-size:0.65rem">A</span></td>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_mcp/test_tools.py</td>
+      <td class="desc">MCPツール15種の単体テスト</td>
+      <td><span class="test-count">~126</span></td>
+      <td><span class="badge badge-a" style="font-size:0.65rem">A</span>〜<span class="badge badge-d" style="font-size:0.65rem">D</span></td>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_mcp/test_mcp_client.py</td>
+      <td class="desc">MCP結合テスト（プロトコル経由）</td>
+      <td><span class="test-count">6</span></td>
+      <td><span class="badge badge-a" style="font-size:0.65rem">A</span></td>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_agno/test_agents.py</td>
+      <td class="desc">コアAgent3種 + Team構築</td>
+      <td><span class="test-count">14</span></td>
+      <td><span class="badge badge-core" style="font-size:0.65rem">Core</span></td>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_agno/test_neo4j_bridge.py</td>
+      <td class="desc">Neo4jブリッジAgent</td>
+      <td><span class="test-count">9</span></td>
+      <td><span class="badge badge-b" style="font-size:0.65rem">B</span></td>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_agno/test_ops_agents.py</td>
+      <td class="desc">運用Agent3種 + Team統合</td>
+      <td><span class="test-count">35</span></td>
+      <td><span class="badge badge-c" style="font-size:0.65rem">C</span></td>
+    </tr>
+    <tr>
+      <td class="file-path">tests/test_agno/test_extended_agents.py</td>
+      <td class="desc">拡張Agent2種 + Team統合</td>
+      <td><span class="test-count">27</span></td>
+      <td><span class="badge badge-d" style="font-size:0.65rem">D</span></td>
+    </tr>
+  </table>
+</section>
+
+<!-- ===== Section 7: ファイル構成 ===== -->
+<section>
+  <h2>ファイル構成</h2>
+  <div class="mermaid">
+graph LR
+    subgraph SRC["src/ga_shift/"]
+        subgraph AGNO["agno_agents/ (9 files)"]
+            direction TB
+            team_py["team.py"]
+            hearing_py["hearing.py"]
+            optimizer_py["optimizer.py"]
+            adjuster_py["adjuster.py"]
+            neo4j_py["neo4j_bridge.py"]
+            monitoring_py["monitoring.py"]
+            compliance_py["compliance.py"]
+            handover_py["handover.py"]
+            report_py["report.py"]
+            simulation_py["simulation.py"]
+        end
+
+        subgraph MCPDIR["mcp/ (2 files)"]
+            server_py["server.py<br/>(15 tools)"]
+            main_py["__main__.py"]
+        end
+
+        subgraph GA["ga/ (4 files)"]
+            engine_py["engine.py"]
+            eval_py["evaluation.py"]
+            ops_py["operators.py"]
+            pop_py["population.py"]
+        end
+
+        subgraph CONS["constraints/ (6 files)"]
+            reg_py["registry.py"]
+            base_py["base.py"]
+            day_py["day_constraints.py"]
+            emp_py["employee_constraints.py"]
+            fair_py["fairness_constraints.py"]
+            kima_py["kimachi_constraints.py"]
+        end
+
+        subgraph IODIR["io/ (3 files)"]
+            reader_py["excel_reader.py"]
+            writer_py["excel_writer.py"]
+            template_py["template_generator.py"]
+        end
+
+        subgraph UIDIR["ui/ (7 files)"]
+            app_py["app.py / chat_app.py"]
+            components_py["components/"]
+            pages_py["pages/"]
+        end
+
+        subgraph MODELS["models/ (6 files)"]
+            model_files["constraint / employee<br/>ga_config / messages<br/>schedule / validation"]
+        end
+    end
+
+    AGNO --> MCPDIR
+    MCPDIR --> GA
+    MCPDIR --> CONS
+    MCPDIR --> IODIR
+    UIDIR --> AGNO
+  </div>
+</section>
+
+<!-- ===== Section 8: Team構成パターン ===== -->
+<section>
+  <h2>Team 構成パターン</h2>
+  <div class="mermaid">
+graph TD
+    subgraph MIN["最小構成 (3 Agent)"]
+        direction LR
+        H1["ヒアリング"]
+        O1["最適化"]
+        A1["調整"]
+    end
+
+    subgraph NEO["+ Neo4j (4 Agent)"]
+        direction LR
+        H2["ヒアリング"]
+        O2["最適化"]
+        A2["調整"]
+        N2["Neo4jブリッジ"]
+    end
+
+    subgraph OPS["+ 運用支援 (6 Agent)"]
+        direction LR
+        H3["ヒアリング"]
+        O3["最適化"]
+        A3["調整"]
+        M3["モニタリング"]
+        C3["コンプライアンス"]
+        HA3["引き継ぎ"]
+    end
+
+    subgraph FULL["フル構成 (9 Agent)"]
+        direction LR
+        H4["ヒアリング"]
+        O4["最適化"]
+        A4["調整"]
+        N4["Neo4jブリッジ"]
+        M4["モニタリング"]
+        C4["コンプライアンス"]
+        HA4["引き継ぎ"]
+        R4["レポート"]
+        S4["シミュレーション"]
+    end
+  </div>
+  <table>
+    <tr>
+      <th>構成</th>
+      <th>パラメータ</th>
+      <th>Agent数</th>
+      <th>用途</th>
+    </tr>
+    <tr>
+      <td>最小構成</td>
+      <td><code>create_shift_team()</code></td>
+      <td>3</td>
+      <td class="desc">基本的なシフト作成のみ</td>
+    </tr>
+    <tr>
+      <td>Neo4j連携</td>
+      <td><code>enable_neo4j=True</code></td>
+      <td>4</td>
+      <td class="desc">通院同行情報の自動反映</td>
+    </tr>
+    <tr>
+      <td>運用支援</td>
+      <td><code>enable_ops=True</code></td>
+      <td>6</td>
+      <td class="desc">品質管理・法令遵守・人事異動</td>
+    </tr>
+    <tr>
+      <td>拡張</td>
+      <td><code>enable_extended=True</code></td>
+      <td>5</td>
+      <td class="desc">レポート・シミュレーション</td>
+    </tr>
+    <tr>
+      <td><strong>フル構成</strong></td>
+      <td><code>enable_neo4j=True, enable_ops=True, enable_extended=True</code></td>
+      <td><strong>9</strong></td>
+      <td class="desc">全機能有効</td>
+    </tr>
+  </table>
+</section>
+
+<!-- ===== Section 9: Git コミット履歴 ===== -->
+<section>
+  <h2>Git コミット履歴</h2>
+  <table>
+    <tr>
+      <th>Hash</th>
+      <th>Phase</th>
+      <th>メッセージ</th>
+      <th>テスト数</th>
+    </tr>
+    <tr>
+      <td class="commit-hash">f9bad6b</td>
+      <td><span class="badge badge-core" style="font-size:0.65rem">1-3</span></td>
+      <td>feat: Agno + MCP による GA-shift 再構成（3フェーズ実装）</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td class="commit-hash">464353a</td>
+      <td><span class="badge badge-core" style="font-size:0.65rem">docs</span></td>
+      <td>docs: README.md 全面更新</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td class="commit-hash">ea0aae2</td>
+      <td><span class="badge badge-a" style="font-size:0.65rem">A</span></td>
+      <td>test: フェーズA テスト強化 — 全113テスト合格</td>
+      <td><span class="test-count">113</span></td>
+    </tr>
+    <tr>
+      <td class="commit-hash">5fdde75</td>
+      <td><span class="badge badge-b" style="font-size:0.65rem">B</span></td>
+      <td>feat: フェーズB Neo4j連携 — Neo4jBridgeAgent + 通院同行MCPツール</td>
+      <td><span class="test-count">148</span></td>
+    </tr>
+    <tr>
+      <td class="commit-hash">9818e5b</td>
+      <td><span class="badge badge-c" style="font-size:0.65rem">C</span></td>
+      <td>feat: フェーズC 運用支援 — MonitoringAgent + ComplianceAgent + HandoverAgent</td>
+      <td><span class="test-count">206</span></td>
+    </tr>
+    <tr>
+      <td class="commit-hash">3e32e0f</td>
+      <td><span class="badge badge-d" style="font-size:0.65rem">D</span></td>
+      <td>feat: フェーズD 拡張エージェント — ReportAgent + SimulationAgent + MCPツール2種</td>
+      <td><span class="test-count">259</span></td>
+    </tr>
+  </table>
+</section>
+
+<div class="footer">
+  GA-shift Architecture Wireframe — Generated 2026-02-07 — kimachiya-shift / feature/agno-mcp-integration
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'neutral',
+    flowchart: { curve: 'basis', padding: 20 },
+    themeVariables: {
+      fontFamily: 'Hiragino Kaku Gothic ProN, Noto Sans JP, sans-serif',
+      fontSize: '14px',
+    }
+  });
+</script>
+</body>
+</html>
