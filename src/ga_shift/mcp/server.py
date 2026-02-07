@@ -813,6 +813,403 @@ def get_accompanied_visits() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Tool 11: analyze_schedule_balance
+# ---------------------------------------------------------------------------
+@mcp.tool
+def analyze_schedule_balance(
+    result_path: str,
+) -> dict[str, Any]:
+    """シフト結果の公平性・偏りを分析します.
+
+    各スタッフの勤務日数、週末出勤回数、最大連続勤務日数を
+    計算し、偏りがある場合は警告を出します。
+
+    Args:
+        result_path: シフトExcelファイルのパス
+
+    Returns:
+        公平性分析の結果
+    """
+    result_file = Path(result_path)
+    if not result_file.exists():
+        return {"status": "error", "message": f"ファイルが見つかりません: {result_path}"}
+
+    shift_input = read_shift_input(result_file)
+    schedule = shift_input.base_schedule
+
+    staff_analysis = []
+    work_day_counts = []
+    weekend_counts = []
+
+    for i, emp in enumerate(shift_input.employees):
+        row = schedule[i]
+        work_days = int(np.sum(row == 0))
+        holidays = int(np.sum((row == 1) | (row == 2)))
+        work_day_counts.append(work_days)
+
+        # Weekend work count (Sat=5, Sun=6)
+        weekend_work = 0
+        for d in range(shift_input.num_days):
+            if d < len(shift_input.day_labels):
+                label = shift_input.day_labels[d]
+                if label in ("土", "日") and row[d] == 0:
+                    weekend_work += 1
+        weekend_counts.append(weekend_work)
+
+        # Max consecutive work days
+        max_consec = 0
+        current_consec = 0
+        for d in range(shift_input.num_days):
+            if row[d] == 0:
+                current_consec += 1
+                max_consec = max(max_consec, current_consec)
+            else:
+                current_consec = 0
+
+        # Has 2+ consecutive holidays?
+        max_consec_off = 0
+        current_off = 0
+        for d in range(shift_input.num_days):
+            if row[d] in (1, 2):
+                current_off += 1
+                max_consec_off = max(max_consec_off, current_off)
+            else:
+                current_off = 0
+
+        staff_analysis.append({
+            "name": emp.name,
+            "employee_type": emp.employee_type.value,
+            "work_days": work_days,
+            "holidays": holidays,
+            "weekend_work": weekend_work,
+            "max_consecutive_work": max_consec,
+            "max_consecutive_off": max_consec_off,
+            "alerts": [],
+        })
+
+        # Alert checks
+        if max_consec >= 7:
+            staff_analysis[-1]["alerts"].append(
+                f"警告: {max_consec}日連続勤務があります"
+            )
+        elif max_consec >= 5:
+            staff_analysis[-1]["alerts"].append(
+                f"注意: {max_consec}日連続勤務があります"
+            )
+        if max_consec_off == 0:
+            staff_analysis[-1]["alerts"].append("注意: 連休がありません")
+
+    # Overall statistics
+    avg_work = float(np.mean(work_day_counts)) if work_day_counts else 0
+    std_work = float(np.std(work_day_counts)) if work_day_counts else 0
+    avg_weekend = float(np.mean(weekend_counts)) if weekend_counts else 0
+    std_weekend = float(np.std(weekend_counts)) if weekend_counts else 0
+
+    # Global alerts
+    alerts = []
+    if std_work > 2.0:
+        alerts.append(f"警告: 勤務日数の偏差が大きい（標準偏差: {std_work:.1f}日）")
+    if std_weekend > 1.5:
+        alerts.append(f"警告: 週末出勤の偏差が大きい（標準偏差: {std_weekend:.1f}回）")
+
+    return {
+        "status": "ok",
+        "staff_count": shift_input.num_employees,
+        "total_days": shift_input.num_days,
+        "average_work_days": round(avg_work, 1),
+        "work_days_std": round(std_work, 1),
+        "average_weekend_work": round(avg_weekend, 1),
+        "weekend_work_std": round(std_weekend, 1),
+        "staff_analysis": staff_analysis,
+        "alerts": alerts,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool 12: get_staffing_requirements
+# ---------------------------------------------------------------------------
+@mcp.tool
+def get_staffing_requirements(
+    facility_type: str = "就労継続支援B型",
+    user_count: int = 20,
+) -> dict[str, Any]:
+    """事業種別に応じた人員配置基準を返します.
+
+    福祉事業所の法的基準に基づいた必要人員数を計算します。
+
+    Args:
+        facility_type: 事業種別（"就労継続支援B型", "就労継続支援A型",
+                        "生活介護", "就労移行支援"）
+        user_count: 利用者定員数
+
+    Returns:
+        人員配置基準の詳細
+    """
+    # B-type employment support standards (障害者総合支援法)
+    requirements: dict[str, Any] = {
+        "facility_type": facility_type,
+        "user_count": user_count,
+        "standards": [],
+        "notes": [],
+    }
+
+    if facility_type == "就労継続支援B型":
+        # 職業指導員 + 生活支援員 (利用者10:1以上)
+        staff_ratio = max(1, (user_count + 9) // 10)  # 切り上げ
+        requirements["standards"].append({
+            "role": "職業指導員・生活支援員",
+            "required": staff_ratio,
+            "unit": "人以上（常勤換算）",
+            "basis": "利用者10人に対し1人以上",
+            "note": "うち1人以上は常勤であること",
+        })
+
+        # サービス管理責任者
+        if user_count <= 60:
+            sabi_count = 1
+        else:
+            sabi_count = 1 + ((user_count - 61) // 40) + 1
+        requirements["standards"].append({
+            "role": "サービス管理責任者",
+            "required": sabi_count,
+            "unit": "人以上",
+            "basis": "利用者60人以下で1人、61人以上で40人ごとに1人追加",
+        })
+
+        # 管理者
+        requirements["standards"].append({
+            "role": "管理者",
+            "required": 1,
+            "unit": "人",
+            "basis": "常勤（他職務との兼務可）",
+        })
+
+        requirements["notes"] = [
+            "営業日ごとに配置基準を満たす必要があります",
+            "常勤換算には週の勤務時間比率を使用します",
+            "パートスタッフは勤務時間に応じた常勤換算で計算",
+        ]
+
+        # 日別最低人員の目安
+        requirements["daily_minimum"] = max(2, staff_ratio)
+        requirements["daily_minimum_note"] = (
+            f"営業日1日あたり最低{max(2, staff_ratio)}人の配置を推奨"
+        )
+
+    elif facility_type == "就労継続支援A型":
+        staff_ratio = max(1, (user_count + 9) // 10)
+        requirements["standards"].append({
+            "role": "職業指導員・生活支援員",
+            "required": staff_ratio,
+            "unit": "人以上（常勤換算）",
+            "basis": "利用者10人に対し1人以上",
+        })
+        requirements["daily_minimum"] = max(2, staff_ratio)
+
+    elif facility_type == "生活介護":
+        # 利用者3:1 or 5:1 (平均障害支援区分による)
+        staff_ratio_high = max(1, (user_count + 2) // 3)
+        staff_ratio_low = max(1, (user_count + 4) // 5)
+        requirements["standards"].append({
+            "role": "生活支援員・看護職員等",
+            "required": staff_ratio_low,
+            "unit": f"人以上（区分により{staff_ratio_low}〜{staff_ratio_high}人）",
+            "basis": "平均障害支援区分5以上:3:1、4以上5未満:4:1、4未満:6:1",
+        })
+        requirements["daily_minimum"] = max(2, staff_ratio_low)
+
+    else:
+        # Generic default
+        staff_ratio = max(1, (user_count + 5) // 6)
+        requirements["standards"].append({
+            "role": "支援員",
+            "required": staff_ratio,
+            "unit": "人以上",
+            "basis": "利用者6人に対し1人以上（目安）",
+        })
+        requirements["daily_minimum"] = max(2, staff_ratio)
+
+    return {
+        "status": "ok",
+        **requirements,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool 13: transfer_staff
+# ---------------------------------------------------------------------------
+@mcp.tool
+def transfer_staff(
+    action: str,
+    staff_name: str,
+    staff_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """スタッフの追加・削除・情報更新を行います.
+
+    人事異動（入退社、セクション変更、条件変更）に対応します。
+
+    Args:
+        action: 操作種別
+            - "add": 新規スタッフ追加
+            - "remove": スタッフ削除（退職）
+            - "update": スタッフ情報の更新
+        staff_name: 対象スタッフの名前
+        staff_info: スタッフ情報（add/updateの場合に使用）
+            {
+                "employee_type": "正規",
+                "section": "仕込み",
+                "vacation_days": 3,
+                "holidays": 9,
+                "unavailable_weekdays": [2]
+            }
+
+    Returns:
+        操作結果
+    """
+    if not _facility_state.get("staff"):
+        return {
+            "status": "error",
+            "message": "事業所が未設定です。先に setup_facility を実行してください。",
+        }
+
+    current_staff = _facility_state["staff"]
+    staff_names = [s["name"] for s in current_staff]
+
+    if action == "add":
+        if staff_name in staff_names:
+            return {
+                "status": "error",
+                "message": f"スタッフ '{staff_name}' はすでに登録されています",
+            }
+
+        new_staff = {"name": staff_name, **(staff_info or {})}
+        current_staff.append(new_staff)
+
+        # Also update employee_presets
+        presets = _facility_state.get("employee_presets", [])
+        presets.append(
+            EmployeePreset(
+                name=staff_name,
+                employee_type=new_staff.get("employee_type", "正規"),
+                section=new_staff.get("section", ""),
+                vacation_days=new_staff.get("vacation_days", 0),
+                holidays=new_staff.get("holidays", 9),
+                unavailable_weekdays=new_staff.get("unavailable_weekdays", []),
+            )
+        )
+        _facility_state["employee_presets"] = presets
+
+        return {
+            "status": "ok",
+            "action": "add",
+            "staff_name": staff_name,
+            "new_total": len(current_staff),
+            "message": f"スタッフ '{staff_name}' を追加しました（合計{len(current_staff)}名）",
+        }
+
+    elif action == "remove":
+        if staff_name not in staff_names:
+            return {
+                "status": "error",
+                "message": f"スタッフ '{staff_name}' が見つかりません",
+            }
+
+        # Remove from staff list
+        _facility_state["staff"] = [
+            s for s in current_staff if s["name"] != staff_name
+        ]
+        # Remove from presets
+        presets = _facility_state.get("employee_presets", [])
+        _facility_state["employee_presets"] = [
+            p for p in presets if p.name != staff_name
+        ]
+
+        # Check accompanied visits impact
+        affected_visits = [
+            v for v in _facility_state.get("accompanied_visits", [])
+            if v["staff_name"] == staff_name
+        ]
+
+        return {
+            "status": "ok",
+            "action": "remove",
+            "staff_name": staff_name,
+            "new_total": len(_facility_state["staff"]),
+            "affected_accompanied_visits": len(affected_visits),
+            "message": (
+                f"スタッフ '{staff_name}' を削除しました"
+                f"（合計{len(_facility_state['staff'])}名）"
+            ),
+            "warnings": (
+                [f"通院同行が{len(affected_visits)}件影響を受けます。再割り当てが必要です。"]
+                if affected_visits
+                else []
+            ),
+        }
+
+    elif action == "update":
+        if staff_name not in staff_names:
+            return {
+                "status": "error",
+                "message": f"スタッフ '{staff_name}' が見つかりません",
+            }
+
+        if not staff_info:
+            return {
+                "status": "error",
+                "message": "更新情報（staff_info）が必要です",
+            }
+
+        # Update staff list
+        changes = []
+        for s in current_staff:
+            if s["name"] == staff_name:
+                for key, value in staff_info.items():
+                    old_value = s.get(key)
+                    if old_value != value:
+                        changes.append({
+                            "field": key,
+                            "old": old_value,
+                            "new": value,
+                        })
+                    s[key] = value
+                break
+
+        # Update employee presets
+        presets = _facility_state.get("employee_presets", [])
+        for p in presets:
+            if p.name == staff_name:
+                if "employee_type" in staff_info:
+                    p.employee_type = staff_info["employee_type"]
+                if "section" in staff_info:
+                    p.section = staff_info["section"]
+                if "vacation_days" in staff_info:
+                    p.vacation_days = staff_info["vacation_days"]
+                if "holidays" in staff_info:
+                    p.holidays = staff_info["holidays"]
+                if "unavailable_weekdays" in staff_info:
+                    p.unavailable_weekdays = staff_info["unavailable_weekdays"]
+                break
+
+        return {
+            "status": "ok",
+            "action": "update",
+            "staff_name": staff_name,
+            "changes": changes,
+            "message": (
+                f"スタッフ '{staff_name}' の情報を更新しました"
+                f"（{len(changes)}項目変更）"
+            ),
+        }
+
+    else:
+        return {
+            "status": "error",
+            "message": f"不正な操作種別です: {action}（add/remove/update のいずれか）",
+        }
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

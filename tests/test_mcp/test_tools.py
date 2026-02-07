@@ -20,14 +20,17 @@ from ga_shift.mcp.server import (
     _facility_state,
     add_constraint as _add_constraint_tool,
     adjust_schedule as _adjust_schedule_tool,
+    analyze_schedule_balance as _analyze_schedule_balance_tool,
     check_compliance as _check_compliance_tool,
     explain_result as _explain_result_tool,
     generate_shift_template as _generate_shift_template_tool,
     get_accompanied_visits as _get_accompanied_visits_tool,
+    get_staffing_requirements as _get_staffing_requirements_tool,
     import_accompanied_visits as _import_accompanied_visits_tool,
     list_constraints as _list_constraints_tool,
     run_optimization as _run_optimization_tool,
     setup_facility as _setup_facility_tool,
+    transfer_staff as _transfer_staff_tool,
 )
 
 # FunctionTool → 元の関数を取得
@@ -45,6 +48,9 @@ adjust_schedule = _unwrap(_adjust_schedule_tool)
 check_compliance = _unwrap(_check_compliance_tool)
 import_accompanied_visits = _unwrap(_import_accompanied_visits_tool)
 get_accompanied_visits = _unwrap(_get_accompanied_visits_tool)
+analyze_schedule_balance = _unwrap(_analyze_schedule_balance_tool)
+get_staffing_requirements = _unwrap(_get_staffing_requirements_tool)
+transfer_staff = _unwrap(_transfer_staff_tool)
 
 
 # ---------------------------------------------------------------------------
@@ -650,3 +656,245 @@ class TestGetAccompaniedVisits:
         assert "type" in visit
         assert "hospital" in visit
         assert "note" in visit
+
+
+# ===================================================================
+# Tool 11: analyze_schedule_balance
+# ===================================================================
+class TestAnalyzeScheduleBalance:
+    def test_analyze_basic(self, kimachiya_template_path):
+        """基本的なバランス分析が成功すること。"""
+        result = analyze_schedule_balance(result_path=str(kimachiya_template_path))
+        assert result["status"] == "ok"
+        assert result["staff_count"] > 0
+        assert result["total_days"] > 0
+
+    def test_analyze_staff_detail(self, kimachiya_template_path):
+        """スタッフ分析に必須フィールドがあること。"""
+        result = analyze_schedule_balance(result_path=str(kimachiya_template_path))
+        for staff in result["staff_analysis"]:
+            assert "name" in staff
+            assert "work_days" in staff
+            assert "holidays" in staff
+            assert "weekend_work" in staff
+            assert "max_consecutive_work" in staff
+            assert "max_consecutive_off" in staff
+            assert "alerts" in staff
+
+    def test_analyze_statistics(self, kimachiya_template_path):
+        """全体統計値が含まれていること。"""
+        result = analyze_schedule_balance(result_path=str(kimachiya_template_path))
+        assert "average_work_days" in result
+        assert "work_days_std" in result
+        assert "average_weekend_work" in result
+        assert "weekend_work_std" in result
+
+    def test_analyze_nonexistent_file(self):
+        """存在しないファイルでエラーが返ること。"""
+        result = analyze_schedule_balance(result_path="/nonexistent/file.xlsx")
+        assert result["status"] == "error"
+        assert "見つかりません" in result["message"]
+
+    def test_analyze_alerts_list(self, kimachiya_template_path):
+        """alertsがリスト形式であること。"""
+        result = analyze_schedule_balance(result_path=str(kimachiya_template_path))
+        assert isinstance(result["alerts"], list)
+        for staff in result["staff_analysis"]:
+            assert isinstance(staff["alerts"], list)
+
+
+# ===================================================================
+# Tool 12: get_staffing_requirements
+# ===================================================================
+class TestGetStaffingRequirements:
+    def test_b_type_default(self):
+        """就労継続支援B型の基準が返されること。"""
+        result = get_staffing_requirements()
+        assert result["status"] == "ok"
+        assert result["facility_type"] == "就労継続支援B型"
+        assert result["user_count"] == 20
+        assert len(result["standards"]) >= 3  # 職業指導員、サビ管、管理者
+
+    def test_b_type_small_facility(self):
+        """少人数施設の基準が正しいこと。"""
+        result = get_staffing_requirements(user_count=10)
+        staff_standard = result["standards"][0]
+        assert staff_standard["required"] == 1  # 10人÷10 = 1人
+
+    def test_b_type_large_facility(self):
+        """大人数施設の基準が正しいこと。"""
+        result = get_staffing_requirements(user_count=50)
+        staff_standard = result["standards"][0]
+        assert staff_standard["required"] == 5  # 50人÷10 = 5人
+
+    def test_b_type_has_notes(self):
+        """B型基準にnotesが含まれていること。"""
+        result = get_staffing_requirements()
+        assert len(result["notes"]) > 0
+
+    def test_b_type_has_daily_minimum(self):
+        """B型基準に日別最低人員があること。"""
+        result = get_staffing_requirements()
+        assert "daily_minimum" in result
+        assert result["daily_minimum"] >= 2
+
+    def test_a_type(self):
+        """就労継続支援A型の基準が返されること。"""
+        result = get_staffing_requirements(
+            facility_type="就労継続支援A型", user_count=20
+        )
+        assert result["status"] == "ok"
+        assert result["facility_type"] == "就労継続支援A型"
+
+    def test_life_care(self):
+        """生活介護の基準が返されること。"""
+        result = get_staffing_requirements(
+            facility_type="生活介護", user_count=20
+        )
+        assert result["status"] == "ok"
+        assert result["facility_type"] == "生活介護"
+
+    def test_unknown_facility_type(self):
+        """不明な事業種別でもデフォルト基準が返ること。"""
+        result = get_staffing_requirements(
+            facility_type="不明な事業種別", user_count=20
+        )
+        assert result["status"] == "ok"
+        assert len(result["standards"]) > 0
+
+    def test_sabi_kan_standard(self):
+        """サービス管理責任者の基準が含まれていること。"""
+        result = get_staffing_requirements()
+        roles = [s["role"] for s in result["standards"]]
+        assert "サービス管理責任者" in roles
+
+    def test_manager_standard(self):
+        """管理者の基準が含まれていること。"""
+        result = get_staffing_requirements()
+        roles = [s["role"] for s in result["standards"]]
+        assert "管理者" in roles
+
+
+# ===================================================================
+# Tool 13: transfer_staff
+# ===================================================================
+class TestTransferStaff:
+    def test_transfer_without_facility(self):
+        """事業所未設定でエラーが返ること。"""
+        result = transfer_staff(action="add", staff_name="テスト太郎")
+        assert result["status"] == "error"
+        assert "事業所が未設定" in result["message"]
+
+    def test_add_staff(self, kimachiya_staff):
+        """新規スタッフの追加ができること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = transfer_staff(
+            action="add",
+            staff_name="新人花子",
+            staff_info={
+                "employee_type": "パート",
+                "section": "ランチ",
+                "vacation_days": 2,
+                "holidays": 9,
+            },
+        )
+        assert result["status"] == "ok"
+        assert result["action"] == "add"
+        assert result["new_total"] == 6
+
+    def test_add_duplicate_staff(self, kimachiya_staff):
+        """既存スタッフ名で追加するとエラーになること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = transfer_staff(action="add", staff_name="川崎聡")
+        assert result["status"] == "error"
+        assert "すでに登録" in result["message"]
+
+    def test_remove_staff(self, kimachiya_staff):
+        """スタッフの削除ができること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = transfer_staff(action="remove", staff_name="橋本由紀")
+        assert result["status"] == "ok"
+        assert result["action"] == "remove"
+        assert result["new_total"] == 4
+
+    def test_remove_nonexistent_staff(self, kimachiya_staff):
+        """存在しないスタッフの削除でエラーが返ること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = transfer_staff(action="remove", staff_name="存在しない人")
+        assert result["status"] == "error"
+        assert "見つかりません" in result["message"]
+
+    def test_remove_staff_with_visits(self, kimachiya_staff):
+        """通院同行が紐づくスタッフの削除で警告が出ること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        import_accompanied_visits(
+            visits=[{
+                "client_name": "山田健太",
+                "staff_name": "川崎聡",
+                "day": 10,
+                "visit_type": "定期通院",
+            }]
+        )
+        result = transfer_staff(action="remove", staff_name="川崎聡")
+        assert result["status"] == "ok"
+        assert result["affected_accompanied_visits"] == 1
+        assert len(result["warnings"]) > 0
+
+    def test_update_staff(self, kimachiya_staff):
+        """スタッフ情報の更新ができること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = transfer_staff(
+            action="update",
+            staff_name="島村誠",
+            staff_info={"section": "仕込み", "vacation_days": 2},
+        )
+        assert result["status"] == "ok"
+        assert result["action"] == "update"
+        assert len(result["changes"]) > 0
+
+    def test_update_nonexistent_staff(self, kimachiya_staff):
+        """存在しないスタッフの更新でエラーが返ること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = transfer_staff(
+            action="update",
+            staff_name="存在しない人",
+            staff_info={"section": "ランチ"},
+        )
+        assert result["status"] == "error"
+
+    def test_update_without_info(self, kimachiya_staff):
+        """更新情報なしでエラーが返ること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = transfer_staff(
+            action="update",
+            staff_name="島村誠",
+        )
+        assert result["status"] == "error"
+        assert "staff_info" in result["message"]
+
+    def test_invalid_action(self, kimachiya_staff):
+        """不正なアクションでエラーが返ること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        result = transfer_staff(action="invalid", staff_name="川崎聡")
+        assert result["status"] == "error"
+        assert "不正な操作" in result["message"]
+
+    def test_add_updates_presets(self, kimachiya_staff):
+        """追加時にemployee_presetsも更新されること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        transfer_staff(
+            action="add",
+            staff_name="新人太郎",
+            staff_info={"employee_type": "正規", "section": "仕込み"},
+        )
+        presets = _facility_state["employee_presets"]
+        preset_names = [p.name for p in presets]
+        assert "新人太郎" in preset_names
+
+    def test_remove_updates_presets(self, kimachiya_staff):
+        """削除時にemployee_presetsも更新されること。"""
+        setup_facility(name="木町家", staff=kimachiya_staff)
+        transfer_staff(action="remove", staff_name="橋本由紀")
+        presets = _facility_state["employee_presets"]
+        preset_names = [p.name for p in presets]
+        assert "橋本由紀" not in preset_names

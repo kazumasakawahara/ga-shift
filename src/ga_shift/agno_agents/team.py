@@ -3,6 +3,8 @@
 ヒアリング → 最適化 → 調整 のフローを管理する。
 enable_neo4j=True にすると Neo4jブリッジAgent が追加され、
 support-db からの利用者通院情報を自動でシフト制約に反映できる。
+enable_ops=True にすると運用支援Agent群（モニタリング・コンプライアンス・
+引き継ぎ）が追加され、生成後のシフト品質管理と人事異動対応を支援する。
 Agno Memory を有効にすると、事業所設定を永続化してセッション間で保持できる。
 """
 
@@ -15,7 +17,10 @@ from agno.models.anthropic import Claude
 from agno.team import Team
 
 from ga_shift.agno_agents.adjuster import create_adjuster_agent
+from ga_shift.agno_agents.compliance import create_compliance_agent
+from ga_shift.agno_agents.handover import create_handover_agent
 from ga_shift.agno_agents.hearing import create_hearing_agent
+from ga_shift.agno_agents.monitoring import create_monitoring_agent
 from ga_shift.agno_agents.neo4j_bridge import create_neo4j_bridge_agent
 from ga_shift.agno_agents.optimizer import create_optimizer_agent
 
@@ -31,6 +36,7 @@ def create_shift_team(
     memory_db_path: str | None = None,
     enable_neo4j: bool = False,
     neo4j_mcp_command: str | None = None,
+    enable_ops: bool = False,
 ) -> Team:
     """シフト最適化チームを作成する。
 
@@ -40,6 +46,7 @@ def create_shift_team(
         memory_db_path: メモリDBのパス（enable_memory=Trueの場合）。
         enable_neo4j: Neo4jブリッジAgentを追加するか。
         neo4j_mcp_command: Neo4j MCPサーバーの起動コマンド。
+        enable_ops: 運用支援Agent群を追加するか。
 
     Returns:
         設定済みのAgno Team
@@ -56,6 +63,13 @@ def create_shift_team(
             neo4j_mcp_command=neo4j_mcp_command,
         )
         members.append(neo4j_bridge)
+
+    # Optional: Operations Agents (Phase C)
+    if enable_ops:
+        monitoring = create_monitoring_agent(mcp_server_command)
+        compliance = create_compliance_agent(mcp_server_command)
+        handover = create_handover_agent(mcp_server_command)
+        members.extend([monitoring, compliance, handover])
 
     # --- Memory configuration ---
     db = None
@@ -80,10 +94,19 @@ def create_shift_team(
         "3. 調整Agent: 結果の説明と手動調整を担当",
     ]
 
+    member_num = 4
     if enable_neo4j:
         base_instructions.append(
-            "4. Neo4jブリッジAgent: 利用者の通院予定からシフト制約を自動生成"
+            f"{member_num}. Neo4jブリッジAgent: 利用者の通院予定からシフト制約を自動生成"
         )
+        member_num += 1
+
+    if enable_ops:
+        base_instructions.extend([
+            f"{member_num}. モニタリングAgent: シフト結果の公平性分析と偏り検出",
+            f"{member_num + 1}. コンプライアンスAgent: 人員配置基準の充足チェック",
+            f"{member_num + 2}. 引き継ぎAgent: スタッフの人事異動対応と設定更新",
+        ])
 
     base_instructions.extend([
         "",
@@ -105,6 +128,19 @@ def create_shift_team(
             "",
             "● 利用者の通院情報 or support-db連携 → Neo4jブリッジAgent",
             "  例: 「利用者の通院予定を反映して」「support-dbから制約を取り込みたい」",
+        ])
+
+    if enable_ops:
+        base_instructions.extend([
+            "",
+            "● シフト結果の偏り分析・公平性チェック → モニタリングAgent",
+            "  例: 「勤務の偏りを確認して」「週末出勤が公平か見て」",
+            "",
+            "● 人員配置基準・法令遵守チェック → コンプライアンスAgent",
+            "  例: 「基準を満たしてるか確認して」「人員配置は大丈夫？」",
+            "",
+            "● スタッフの入退社・異動・条件変更 → 引き継ぎAgent",
+            "  例: 「新しいスタッフが入った」「○○さんが退職する」「セクション異動」",
         ])
 
     base_instructions.extend([

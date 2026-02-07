@@ -39,18 +39,21 @@ class TestMCPToolDiscovery:
         tools = await client.list_tools()
         tool_names = sorted(t.name for t in tools)
 
-        assert len(tools) == 10
+        assert len(tools) == 13
         assert tool_names == [
             "add_constraint",
             "adjust_schedule",
+            "analyze_schedule_balance",
             "check_compliance",
             "explain_result",
             "generate_shift_template",
             "get_accompanied_visits",
+            "get_staffing_requirements",
             "import_accompanied_visits",
             "list_constraints",
             "run_optimization",
             "setup_facility",
+            "transfer_staff",
         ]
 
     @pytest.mark.asyncio
