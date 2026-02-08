@@ -19,3 +19,10 @@ env/
 .DS_Store
 *.log
 all_transcripts.json
+
+# Jupyter
+.ipynb_checkpoints/
+Untitled.ipynb
+
+# Handover
+HANDOVER.md

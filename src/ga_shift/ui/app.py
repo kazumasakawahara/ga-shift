@@ -15,9 +15,13 @@ def main() -> None:
     st.title("GA-Shift シフトスケジューラー")
     st.caption("遺伝的アルゴリズムによるシフト表自動作成")
 
-    tab_upload, tab_constraints, tab_execution, tab_results = st.tabs(
-        ["入力データ", "制約設定", "GA実行", "結果"]
+    tab_template, tab_upload, tab_constraints, tab_execution, tab_results = st.tabs(
+        ["テンプレート生成", "入力データ", "制約設定", "GA実行", "結果"]
     )
+
+    with tab_template:
+        from ga_shift.ui.pages.template import render_template_page
+        render_template_page()
 
     with tab_upload:
         from ga_shift.ui.pages.upload import render_upload_page

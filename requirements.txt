@@ -1,0 +1,3 @@
+# GA-Shift: Install the package from pyproject.toml
+# This installs ga_shift + all core dependencies (numpy, pandas, pydantic, openpyxl, streamlit)
+.
