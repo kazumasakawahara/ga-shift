@@ -49,3 +49,9 @@ select = ["E", "F", "W", "I"]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.2.0",
+    "jupyterlab>=4.5.3",
+]

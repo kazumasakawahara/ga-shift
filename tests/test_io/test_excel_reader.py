@@ -26,7 +26,7 @@ class TestReadShiftInput:
     def test_required_workers(self, sample_shift_input: ShiftInput):
         rw = sample_shift_input.required_workers
         assert len(rw) == sample_shift_input.num_days
-        assert all(rw > 0)
+        assert all(rw >= 0)  # 定休日は0の場合あり
 
     def test_base_schedule_shape(self, sample_shift_input: ShiftInput):
         expected = (sample_shift_input.num_employees, sample_shift_input.num_days)
@@ -99,4 +99,12 @@ class TestKimachiyaRoundTrip:
     def test_kimachiya_kitchen_required(self, kimachiya_excel):
         si = read_shift_input(kimachiya_excel)
         assert si.required_kitchen_workers is not None
-        assert all(si.required_kitchen_workers == 3)
+        # 平日は3名、土日(定休日)は0名
+        import calendar
+
+        for i, req in enumerate(si.required_kitchen_workers):
+            wd = calendar.weekday(2026, 3, i + 1)
+            if wd in (5, 6):  # Sat, Sun
+                assert req == 0, f"Day {i+1} is weekend but required={req}"
+            else:
+                assert req == 3, f"Day {i+1} is weekday but required={req}"

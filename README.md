@@ -11,7 +11,7 @@
 - **Agno AIエージェントチーム（最大9 Agent）** — ヒアリング → 最適化 → 調整を軸に、Neo4j連携・運用支援・レポート・シミュレーションまで対話的に支援
 - **2種類のUI** — タブ式Web UI（従来型）とチャット式AI UI（Agno統合型）を選択可能
 - **Excel入出力** — 既存の勤務表Excelをそのまま入力し、結果もExcelで出力
-- **259テスト** — 制約・GA・IO・MCP・Agno全レイヤーの包括的テストスイート
+- **270テスト** — 制約・GA・IO・MCP・Agno全レイヤーの包括的テストスイート
 
 ## アーキテクチャ
 
@@ -64,7 +64,7 @@ cd ga-shift
 uv sync
 uv pip install -e ".[agno]"    # Agno + MCP を使う場合
 
-# 3. テスト実行（259件）
+# 3. テスト実行（270件）
 uv run pytest tests/ -q
 
 # 4. UI起動（いずれか）
@@ -174,7 +174,29 @@ uv run python -m ga_shift.mcp
 
 設定方法は上記「Claude Desktop 設定」セクションを参照してください。
 
-### 4. Python API
+### 4. Jupyter Notebook で利用する
+
+Jupyter Lab を使って、テンプレート生成から最適化実行までをノートブック上で操作できます。
+
+```bash
+# Jupyter Lab 起動
+cd ~/Nest/kimachiya-shift
+uv run jupyter lab
+```
+
+ブラウザで `notebooks/kimachiya_shift.ipynb` を開き、以下の流れで操作します:
+
+| ステップ | 操作 | 説明 |
+|:---:|:---|:---|
+| 0 | `YEAR` と `MONTH` を設定 | 対象年月をセルで指定 |
+| 1 | テンプレート生成セルを実行 | `output/shift_template_YYYY_MM.xlsx` が作成される |
+| — | **Excelで◎を入力して保存** | 希望休を入力する唯一の手作業 |
+| 2 | 最適化実行セルを実行 | GA実行 → `output/shift_result_YYYY_MM.xlsx` が出力される |
+| 3 | 結果サマリーセルを実行 | シフト表と制約違反をノートブック上で確認 |
+
+結果Excelには「GA結果シフト表」（色分け済み）と「バリデーション結果」の2シートが含まれます。
+
+### 5. Python API
 
 ```python
 from ga_shift.agents.conductor import ConductorAgent
@@ -301,6 +323,7 @@ Row 4: 川崎聡  正規    仕込み・ランチ   3        ◎ ...
 | 代役ルール | 40 | 島村休→斎藤が出勤する代替ルール |
 | 有給取得上限 | 20 | 有休残日数以上の希望休を抑制 |
 | 出勤不可日保護 | 1000 | ×マークの日に出勤を割り当てない（ハード制約） |
+| 定休日制約（土日） | 500 / 100 | 土日は定休日（ハード制約500）。研修等の臨時営業日は正規のみ出勤可、パートは100のソフトペナルティ |
 
 ## プロジェクト構成
 
@@ -329,7 +352,7 @@ kimachiya-shift/
 │   │   ├── population.py         ← 初期集団生成
 │   │   └── evaluation.py         ← 適応度評価
 │   │
-│   ├── constraints/              ← 制約テンプレートシステム（14種+4木町家専用）
+│   ├── constraints/              ← 制約テンプレートシステム（14種+5木町家専用=19制約）
 │   │   ├── registry.py           ← ConstraintRegistry（プラグイン管理）
 │   │   ├── kimachi_constraints.py← 木町家専用制約
 │   │   ├── pattern_constraints.py
@@ -371,10 +394,13 @@ kimachiya-shift/
 │       ├── components/           ← UIコンポーネント
 │       └── pages/                ← 各タブページ
 │
+├── notebooks/
+│   └── kimachiya_shift.ipynb     ← Jupyter Notebook（テンプレート生成→最適化→結果確認）
+│
 ├── scripts/
 │   └── chat_constraints.py       ← チャット形式の制約設定
 │
-└── tests/                        ← テストスイート（259件）
+└── tests/                        ← テストスイート（270件）
     ├── test_agents/              ← 内部エージェントテスト
     ├── test_constraints/         ← 制約テスト
     ├── test_ga/                  ← GAエンジンテスト
@@ -393,7 +419,7 @@ kimachiya-shift/
 ## 開発
 
 ```bash
-# テスト実行（259件）
+# テスト実行（270件）
 uv run pytest tests/ -q
 
 # 詳細テスト（テスト名表示）
@@ -419,6 +445,7 @@ uv run mypy src/ga_shift/
 | グラフDB連携 | Neo4j（support-db MCP） |
 | Web UI | Streamlit |
 | テスト | pytest, pytest-asyncio |
+| ノートブック | Jupyter Lab, ipykernel |
 | パッケージ管理 | uv + hatchling |
 
 ## ライセンス

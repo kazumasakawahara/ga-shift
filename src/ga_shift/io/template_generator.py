@@ -40,6 +40,7 @@ def generate_template(
     employee_names: list[str] | None = None,
     employee_presets: list[EmployeePreset] | None = None,
     kitchen_required: int | None = None,
+    closed_weekdays: list[int] | None = None,
 ) -> Path:
     """Generate an Excel template for shift input.
 
@@ -53,6 +54,8 @@ def generate_template(
         employee_names: Optional list of employee names.
         employee_presets: Optional list of EmployeePreset for detailed info.
         kitchen_required: If set, add a kitchen required workers row.
+        closed_weekdays: List of weekday indices (0=Mon..6=Sun) that are
+            regular closed days.  Required count is set to 0 on these days.
 
     Returns:
         Path to the generated file.
@@ -266,9 +269,12 @@ def generate_template(
     cell.alignment = center
     cell.border = thin_border
 
+    _closed_set = set(closed_weekdays) if closed_weekdays else set()
     for d in range(1, num_days + 1):
         col = _DAY_COL_OFFSET + d
-        cell = ws.cell(row=req_row, column=col, value=req_count)
+        weekday_idx = calendar.weekday(year, month, d)
+        day_req = 0 if weekday_idx in _closed_set else req_count
+        cell = ws.cell(row=req_row, column=col, value=day_req)
         cell.font = Font(name="Arial", size=11)
         cell.fill = orange_fill
         cell.alignment = center
@@ -354,6 +360,7 @@ def generate_kimachiya_template(
         month=month,
         employee_presets=presets,
         kitchen_required=3,
+        closed_weekdays=[5, 6],  # 土日定休
     )
 
 
