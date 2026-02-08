@@ -85,6 +85,13 @@ def _create_default_registry() -> ConstraintRegistry:
         EqualHolidayDistribution,
         EqualWeekendDistribution,
     )
+    from ga_shift.constraints.kimachi_constraints import (
+        ClosedDayConstraint,
+        KitchenMinWorkers,
+        SubstituteConstraint,
+        UnavailableDayHard,
+        VacationDaysLimit,
+    )
     from ga_shift.constraints.pattern_constraints import (
         AvoidLongConsecutiveWork,
         ConsecutiveHolidayBonus,
@@ -112,6 +119,12 @@ def _create_default_registry() -> ConstraintRegistry:
         # Fairness constraints
         EqualWeekendDistribution,
         EqualHolidayDistribution,
+        # Kimachiya constraints
+        KitchenMinWorkers,
+        SubstituteConstraint,
+        VacationDaysLimit,
+        UnavailableDayHard,
+        ClosedDayConstraint,
     ]:
         registry.register(template_cls())
     return registry

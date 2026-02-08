@@ -42,9 +42,9 @@ def mutation(
 ) -> NDArray[np.int_]:
     """Mutation operator.
 
-    Migrated from ga_shift_v2.py:mutation().
     - mutation_rate chance of triggering mutation
-    - When triggered, flip gene_ratio fraction of genes (0↔1, skip 2)
+    - When triggered, flip gene_ratio fraction of mutable genes (0↔1)
+    - Codes 2 (preferred off) and 3 (unavailable) are never changed
     """
     if np.random.random() >= mutation_rate:
         return child
@@ -52,15 +52,19 @@ def mutation(
     result = child.copy()
     flat = result.flatten()
 
-    mutation_count = max(1, int(len(flat) * gene_ratio))
-    indices = np.random.permutation(len(flat))[:mutation_count]
+    # Only mutate genes that are 0 or 1 (mutable)
+    mutable_indices = np.where((flat == 0) | (flat == 1))[0]
+    if len(mutable_indices) == 0:
+        return result
 
-    for idx in indices:
+    mutation_count = max(1, int(len(mutable_indices) * gene_ratio))
+    chosen = np.random.choice(mutable_indices, size=min(mutation_count, len(mutable_indices)), replace=False)
+
+    for idx in chosen:
         if flat[idx] == 0:
             flat[idx] = 1
         elif flat[idx] == 1:
             flat[idx] = 0
-        # 2 (preferred off) is never changed
 
     return flat.reshape(child.shape)
 
@@ -71,8 +75,9 @@ def holiday_fix(
 ) -> NDArray[np.int_]:
     """Adjust holiday counts to match contract requirements.
 
-    Migrated from ga_shift_v2.py:holiday_fix().
-    Uses np.random.choice for efficiency instead of while-loop.
+    Uses np.random.choice for efficiency.
+    Codes 2 (preferred off) and 3 (unavailable) count as non-work days
+    and are never modified. Only values 0 and 1 are adjusted.
     """
     result = schedule.copy()
 
@@ -80,14 +85,15 @@ def holiday_fix(
         row = result[emp.index]
         target = emp.required_holidays
 
-        actual = int(np.count_nonzero(row))  # 1 and 2 are both non-zero
+        # Count all non-work days: 1 (GA holiday), 2 (preferred off), 3 (unavailable)
+        actual = int(np.count_nonzero(row))
         diff = actual - target
 
         if diff == 0:
             continue
 
         if diff > 0:
-            # Too many holidays → convert some 1s back to 0
+            # Too many holidays → convert some GA-assigned holidays (1) back to work (0)
             holiday_indices = np.where(row == 1)[0]
             if len(holiday_indices) >= diff:
                 to_remove = np.random.choice(holiday_indices, size=diff, replace=False)
@@ -95,7 +101,7 @@ def holiday_fix(
             else:
                 row[holiday_indices] = 0
         else:
-            # Too few holidays → convert some 0s to 1
+            # Too few holidays → convert some available work days (0) to holiday (1)
             work_indices = np.where(row == 0)[0]
             need = -diff
             if len(work_indices) >= need:

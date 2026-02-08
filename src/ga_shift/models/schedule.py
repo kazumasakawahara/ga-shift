@@ -22,13 +22,16 @@ class ShiftInput(BaseModel):
         description="Required workers per day, shape=(num_days,)"
     )
     base_schedule: NDArray[np.int_] = Field(
-        description="Base schedule matrix, shape=(num_employees, num_days). 0=work, 2=preferred off"
+        description="Base schedule matrix, shape=(num_employees, num_days). 0=work, 2=preferred off, 3=unavailable"
     )
     day_labels: list[str] = Field(
         default_factory=list, description="Day labels (e.g. '1(月)')"
     )
     weekdays: list[int] = Field(
         default_factory=list, description="Weekday indices (0=Mon..6=Sun) for each day"
+    )
+    required_kitchen_workers: NDArray[np.int_] | None = Field(
+        default=None, description="Required kitchen workers per day, shape=(num_days,)"
     )
 
 
@@ -41,7 +44,7 @@ class ScheduleContext(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     schedule: NDArray[np.int_] = Field(
-        description="Schedule matrix, shape=(num_employees, num_days). 0=work, 1=holiday, 2=preferred off"
+        description="Schedule matrix, shape=(num_employees, num_days). 0=work, 1=holiday, 2=preferred off, 3=unavailable"
     )
     shift_input: ShiftInput
     employee_index: int | None = Field(
@@ -61,8 +64,8 @@ class ScheduleContext(BaseModel):
 
     @property
     def binary_schedule(self) -> NDArray[np.int_]:
-        """Schedule where 2 (preferred off) is treated as 1 (holiday)."""
-        return np.where(self.schedule == 2, 1, self.schedule)
+        """Schedule where 2 (preferred off) and 3 (unavailable) are treated as 1 (holiday)."""
+        return np.where(self.schedule >= 2, 1, self.schedule)
 
     @property
     def work_schedule(self) -> NDArray[np.int_]:
